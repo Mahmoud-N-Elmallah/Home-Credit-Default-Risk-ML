@@ -1,0 +1,71 @@
+# Project Configuration
+
+data:
+  raw:
+    application_train: "Data/Raw/application_train.csv"
+    application_test: "Data/Raw/application_test.csv"
+    bureau: "Data/Raw/bureau.csv"
+    bureau_balance: "Data/Raw/bureau_balance.csv"
+    previous_application: "Data/Raw/previous_application.csv"
+    pos_cash_balance: "Data/Raw/POS_CASH_balance.csv"
+    installments_payments: "Data/Raw/installments_payments.csv"
+    credit_card_balance: "Data/Raw/credit_card_balance.csv"
+
+  final:
+    train: "Data/final/final_train.csv"
+    test: "Data/final/final_test.csv"
+
+training:
+  target_col: "TARGET"
+  id_col: "SK_ID_CURR"
+  optimization_metric: "roc_auc"
+  cv_splits: 5
+
+  preprocessing:
+    scaler: "robust" # Options: 'standard', 'robust', 'minmax', 'none'
+    imbalance_strategy: "borderline_smote" # Options: 'class_weight', 'smote', 'borderline_smote', 'adasyn', 'none'
+    feature_selection:
+      method: "lgbm" # Options: 'lgbm', 'none' - Use LightGBM to select top features
+      max_features: 150 # How many top features to keep. Reduces noise and speeds up training.
+
+  models:
+    type: "single" # Options: 'single', 'ensemble'
+
+    estimators:
+      - name: "catboost"
+        weight: 1.0 # Ignored in 'single' mode
+        params:
+          iterations: 100
+          learning_rate: 0.05
+          depth: 6
+          task_type: "GPU"
+        param_grid:
+          model__iterations: [ 100, 200 ]
+          model__learning_rate: [ 0.05 ]
+
+      - name: "lightgbm"
+        weight: 0.5 
+        # Fixed parameters for ensemble mode
+        params:
+          n_estimators: 100
+          learning_rate: 0.05
+          max_depth: 6
+          device_type: "gpu"
+        # Grid for single mode. MUST prefix with 'model__' for imblearn pipeline.
+        param_grid:
+          model__num_leaves: [ 31, 63 ]
+          model__max_depth: [ 6, -1 ]
+          model__learning_rate: [ 0.05 ]
+          model__n_estimators: [ 500, 1000 ]
+
+      - name: "xgboost"
+        weight: 0.5
+        params:
+          n_estimators: 100
+          learning_rate: 0.05
+          max_depth: 6
+          tree_method: "hist"
+          device: "cuda"
+        param_grid:
+          model__n_estimators: [ 100, 200 ]
+          model__learning_rate: [ 0.05 ]

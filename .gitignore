@@ -3,8 +3,11 @@ __pycache__/
 *.py[codz]
 *$py.class
 # my ignores 
-
+Models/
 Data/
+.env
+catboost_info/
+Notebooks/
 
 
 
