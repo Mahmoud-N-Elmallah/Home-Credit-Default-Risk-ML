@@ -2,6 +2,11 @@
 __pycache__/
 *.py[codz]
 *$py.class
+# my ignores 
+
+Data/
+
+
 
 # C extensions
 *.so
