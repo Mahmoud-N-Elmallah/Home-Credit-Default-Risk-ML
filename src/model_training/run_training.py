@@ -1,7 +1,7 @@
 from copy import deepcopy
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-import json
 import re
 
 import joblib
@@ -17,12 +17,19 @@ from imblearn.under_sampling import RandomUnderSampler
 from lightgbm import LGBMClassifier, early_stopping
 from sklearn.feature_selection import SelectFromModel
 from sklearn.metrics import (
+    accuracy_score,
     average_precision_score,
+    brier_score_loss,
     classification_report,
     confusion_matrix,
     f1_score,
+    precision_recall_curve,
+    precision_score,
+    recall_score,
+    roc_curve,
     roc_auc_score,
 )
+from sklearn.calibration import calibration_curve
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from tqdm import tqdm
@@ -82,13 +89,69 @@ def file_hash(path):
     return digest.hexdigest()
 
 
+def slugify(value):
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value).strip())
+    return slug.strip("_") or "experiment"
+
+
+def primary_model_name(config):
+    return config["training"]["models"]["primary"]
+
+
+def get_primary_estimator_config(config):
+    primary = primary_model_name(config)
+    for candidate in config["training"]["models"]["candidates"]:
+        if candidate["name"] == primary:
+            return candidate
+    raise ValueError(f"training.models.primary not found in training.models.candidates: {primary}")
+
+
+def create_experiment_dir(models_root, config):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    t_config = config["training"]
+    exp_config = t_config["experiment"]
+    if exp_config.get("name"):
+        experiment_id = slugify(exp_config["name"])
+    else:
+        experiment_id = exp_config["folder_template"].format(
+            timestamp=timestamp,
+            run_mode=t_config["run_mode"],
+            primary_model=primary_model_name(config),
+        )
+        experiment_id = slugify(experiment_id)
+
+    experiments_dir = Path(t_config["artifact_paths"]["experiments_dir"])
+    experiments_root = experiments_dir if experiments_dir.is_absolute() else models_root / experiments_dir
+    experiment_dir = experiments_root / experiment_id
+    suffix = 1
+    while experiment_dir.exists():
+        suffix += 1
+        experiment_dir = experiments_root / f"{experiment_id}_{suffix}"
+    experiment_dir.mkdir(parents=True, exist_ok=False)
+    return experiment_dir, experiment_dir.name, timestamp
+
+
+def write_latest_experiment_pointer(models_root, config, experiment_dir):
+    latest_path = Path(config["training"]["artifact_paths"]["latest_experiment"])
+    if not latest_path.is_absolute():
+        latest_path = models_root / latest_path
+    latest_path.parent.mkdir(parents=True, exist_ok=True)
+    latest_path.write_text(str(experiment_dir.resolve()), encoding="utf-8")
+
+
+def save_config_snapshot(experiment_dir, config):
+    path = model_artifact_path(experiment_dir, config, "config_snapshot")
+    with open(path, "w", encoding="utf-8") as file:
+        yaml.safe_dump(config, file, sort_keys=False)
+
+
 def metadata_path(models_dir, config):
     metadata_name = config["training"]["artifact_reuse"]["metadata"]
     path = Path(metadata_name)
     return path if path.is_absolute() else models_dir / path
 
 
-def build_run_metadata(config, X, y, train_path):
+def build_run_metadata(config, X, y, train_path, experiment_id, timestamp):
     phases = config["training"]["phases"]
     metric_scopes = []
     if phases["search"]:
@@ -99,9 +162,12 @@ def build_run_metadata(config, X, y, train_path):
         metric_scopes.append("final_train_fit")
 
     return {
+        "experiment_id": experiment_id,
+        "timestamp": timestamp,
         "config_hash": stable_yaml_hash(config),
         "data_hashes": {str(train_path): file_hash(train_path)},
         "run_mode": config["training"]["run_mode"],
+        "primary_model": primary_model_name(config),
         "phases": phases,
         "cv_splits": config["training"]["cv_splits"],
         "optuna_n_trials": config["training"]["optuna_n_trials"],
@@ -111,11 +177,21 @@ def build_run_metadata(config, X, y, train_path):
         "positive_count": int(y.sum()),
         "metric_scopes": metric_scopes,
         "selected_accelerators": {},
+        "chosen_threshold": None,
+        "artifact_list": [],
     }
 
 
 def write_run_metadata(models_dir, config, metadata):
+    metadata_file_name = config["training"]["artifact_reuse"]["metadata"]
+    artifact_list = [
+        str(path.relative_to(models_dir)).replace("\\", "/")
+        for path in models_dir.rglob("*")
+        if path.is_file() and path.name != metadata_file_name
+    ]
     path = metadata_path(models_dir, config)
+    artifact_list.append(str(path.relative_to(models_dir)).replace("\\", "/"))
+    metadata["artifact_list"] = sorted(artifact_list)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as file:
         yaml.safe_dump(metadata, file, sort_keys=False)
@@ -387,36 +463,114 @@ def calculate_metric(y_true, y_pred_prob, metric_name, threshold):
 def model_artifact_path(models_dir, config, key, **kwargs):
     pattern = config["training"]["artifact_paths"][key]
     path = Path(pattern.format(**kwargs))
-    return path if path.is_absolute() else models_dir / path
+    resolved = path if path.is_absolute() else models_dir / path
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    return resolved
 
 
-def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, evaluation_scope):
-    allowed_scopes = {"out_of_fold", "search_subsample_cv", "final_train_fit"}
-    if evaluation_scope not in allowed_scopes:
-        raise ValueError(f"Invalid evaluation scope: {evaluation_scope}")
+def threshold_grid(config):
+    grid = config["training"]["threshold_tuning"]["grid"]
+    min_value = float(grid["min"])
+    max_value = float(grid["max"])
+    step = float(grid["step"])
+    count = int(round((max_value - min_value) / step)) + 1
+    return np.round(np.linspace(min_value, max_value, count), 10)
 
-    t_config = config["training"]
-    eval_config = t_config["evaluation"]
-    threshold = t_config["classification_threshold"]
-    y_pred_bin = (y_pred_prob > threshold).astype(int)
 
-    report_str = f"Model: {model_name}\n"
-    report_str += "=" * 40 + "\n"
-    report_str += f"Evaluation Scope: {evaluation_scope}\n"
-    report_str += f"Run Mode: {t_config['run_mode']}\n"
-    report_str += f"Classification Threshold: {threshold}\n"
-    report_str += f"ROC AUC Score: {roc_auc_score(y_true, y_pred_prob):.4f}\n"
-    report_str += f"Average Precision (PR AUC): {average_precision_score(y_true, y_pred_prob):.4f}\n"
-    report_str += f"F1 Score: {f1_score(y_true, y_pred_bin):.4f}\n\n"
-    report_str += "Classification Report:\n"
-    report_str += classification_report(y_true, y_pred_bin, digits=eval_config["report_digits"], zero_division=0)
+def build_threshold_table(y_true, y_pred_prob, config):
+    rows = []
+    for threshold in threshold_grid(config):
+        y_pred_bin = (y_pred_prob > threshold).astype(int)
+        rows.append(
+            {
+                "threshold": float(threshold),
+                "precision": precision_score(y_true, y_pred_bin, zero_division=0),
+                "recall": recall_score(y_true, y_pred_bin, zero_division=0),
+                "f1": f1_score(y_true, y_pred_bin, zero_division=0),
+                "accuracy": accuracy_score(y_true, y_pred_bin),
+            }
+        )
+    return pd.DataFrame(rows)
 
-    models_dir.mkdir(parents=True, exist_ok=True)
-    model_artifact_path(models_dir, config, "evaluation_report", model_name=model_name).write_text(
-        report_str,
-        encoding="utf-8",
+
+def choose_threshold(y_true, y_pred_prob, config, evaluation_scope):
+    tuning_config = config["training"]["threshold_tuning"]
+    if not tuning_config["enabled"]:
+        threshold = float(config["training"]["classification_threshold"])
+        return {
+            "threshold": threshold,
+            "objective": "configured",
+            "source": "config_classification_threshold",
+            "score": None,
+        }, build_threshold_table(y_true, y_pred_prob, config)
+
+    if tuning_config["objective"] != "f1":
+        raise ValueError(f"Unknown threshold_tuning.objective: {tuning_config['objective']}")
+
+    table = build_threshold_table(y_true, y_pred_prob, config)
+    best_row = table.sort_values(["f1", "precision", "threshold"], ascending=[False, False, True]).iloc[0]
+    source = "oof_max_f1" if evaluation_scope == "out_of_fold" else f"{evaluation_scope}_max_f1"
+    return {
+        "threshold": float(best_row["threshold"]),
+        "objective": "f1",
+        "source": source,
+        "score": float(best_row["f1"]),
+    }, table
+
+
+def build_lift_table(y_true, y_pred_prob):
+    frame = pd.DataFrame({"target": np.asarray(y_true), "prediction": np.asarray(y_pred_prob)})
+    frame = frame.sort_values("prediction", ascending=False).reset_index(drop=True)
+    frame["decile"] = np.floor(np.arange(len(frame)) * 10 / len(frame)).astype(int) + 1
+    total_defaults = frame["target"].sum()
+    lift = (
+        frame.groupby("decile", as_index=False)
+        .agg(
+            row_count=("target", "size"),
+            default_count=("target", "sum"),
+            default_rate=("target", "mean"),
+            min_score=("prediction", "min"),
+            max_score=("prediction", "max"),
+        )
+        .sort_values("decile")
     )
+    lift = (
+        lift.set_index("decile")
+        .reindex(range(1, 11))
+        .rename_axis("decile")
+        .reset_index()
+    )
+    for col in ["row_count", "default_count"]:
+        lift[col] = lift[col].fillna(0).astype(int)
+    lift["default_rate"] = lift["default_rate"].fillna(0.0)
+    lift["cumulative_default_count"] = lift["default_count"].cumsum()
+    if total_defaults > 0:
+        lift["cumulative_default_capture"] = lift["cumulative_default_count"] / total_defaults
+    else:
+        lift["cumulative_default_capture"] = 0.0
+    return lift
 
+
+def save_oof_predictions(y_true, y_pred_prob, ids, models_dir, config):
+    if not config["training"]["reports"]["save_oof_predictions"]:
+        return
+    id_col = config["training"]["id_col"]
+    target_col = config["training"]["target_col"]
+    output = pd.DataFrame(
+        {
+            id_col: ids.to_numpy() if ids is not None else np.arange(len(y_true)),
+            target_col: np.asarray(y_true),
+            "prediction": np.asarray(y_pred_prob),
+        }
+    )
+    output.to_csv(model_artifact_path(models_dir, config, "oof_predictions"), index=False)
+
+
+def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_name, models_dir, config, evaluation_scope):
+    if not config["training"]["reports"]["save_curves"]:
+        return
+
+    eval_config = config["training"]["evaluation"]
     cm = confusion_matrix(y_true, y_pred_bin)
     plt.figure(figsize=tuple(eval_config["confusion_matrix_figsize"]))
     sns.heatmap(cm, annot=True, fmt="d", cmap=eval_config["confusion_matrix_cmap"])
@@ -424,8 +578,111 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     plt.ylabel("Actual")
     plt.xlabel("Predicted")
     plt.tight_layout()
-    plt.savefig(model_artifact_path(models_dir, config, "confusion_matrix", model_name=model_name))
+    plt.savefig(model_artifact_path(models_dir, config, "confusion_matrix"))
     plt.close()
+
+    fpr, tpr, _ = roc_curve(y_true, y_pred_prob)
+    plt.figure(figsize=(6, 5))
+    plt.plot(fpr, tpr)
+    plt.plot([0, 1], [0, 1], linestyle="--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title(f"ROC Curve: {model_name}")
+    plt.tight_layout()
+    plt.savefig(model_artifact_path(models_dir, config, "roc_curve"))
+    plt.close()
+
+    precision, recall, _ = precision_recall_curve(y_true, y_pred_prob)
+    plt.figure(figsize=(6, 5))
+    plt.plot(recall, precision)
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.title(f"Precision-Recall Curve: {model_name}")
+    plt.tight_layout()
+    plt.savefig(model_artifact_path(models_dir, config, "pr_curve"))
+    plt.close()
+
+    prob_true, prob_pred = calibration_curve(y_true, y_pred_prob, n_bins=10, strategy="quantile")
+    plt.figure(figsize=(6, 5))
+    plt.plot(prob_pred, prob_true, marker="o")
+    plt.plot([0, 1], [0, 1], linestyle="--")
+    plt.xlabel("Mean Predicted Probability")
+    plt.ylabel("Observed Default Rate")
+    plt.title(f"Calibration Curve: {model_name}")
+    plt.tight_layout()
+    plt.savefig(model_artifact_path(models_dir, config, "calibration_curve"))
+    plt.close()
+
+    plt.figure(figsize=(7, 5))
+    plt.bar(lift_table["decile"], lift_table["default_rate"])
+    plt.xlabel("Risk Decile (1 = highest risk)")
+    plt.ylabel("Default Rate")
+    plt.title(f"Lift by Decile: {model_name}")
+    plt.tight_layout()
+    plt.savefig(model_artifact_path(models_dir, config, "lift_chart"))
+    plt.close()
+
+
+def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, evaluation_scope, ids=None):
+    allowed_scopes = {"out_of_fold", "search_subsample_cv", "final_train_fit"}
+    if evaluation_scope not in allowed_scopes:
+        raise ValueError(f"Invalid evaluation scope: {evaluation_scope}")
+
+    t_config = config["training"]
+    eval_config = t_config["evaluation"]
+    threshold_info, threshold_table = choose_threshold(y_true, y_pred_prob, config, evaluation_scope)
+    threshold = threshold_info["threshold"]
+    y_pred_bin = (y_pred_prob > threshold).astype(int)
+    lift_table = build_lift_table(y_true, y_pred_prob)
+    metrics = {
+        "model": model_name,
+        "evaluation_scope": evaluation_scope,
+        "run_mode": t_config["run_mode"],
+        "threshold": threshold_info,
+        "ranking": {
+            "roc_auc": float(roc_auc_score(y_true, y_pred_prob)),
+            "average_precision": float(average_precision_score(y_true, y_pred_prob)),
+            "brier_score": float(brier_score_loss(y_true, y_pred_prob)),
+        },
+        "threshold_metrics": {
+            "precision": float(precision_score(y_true, y_pred_bin, zero_division=0)),
+            "recall": float(recall_score(y_true, y_pred_bin, zero_division=0)),
+            "f1": float(f1_score(y_true, y_pred_bin, zero_division=0)),
+            "accuracy": float(accuracy_score(y_true, y_pred_bin)),
+        },
+    }
+
+    report_str = f"Model: {model_name}\n"
+    report_str += "=" * 40 + "\n"
+    report_str += f"Evaluation Scope: {evaluation_scope}\n"
+    report_str += f"Run Mode: {t_config['run_mode']}\n"
+    report_str += f"Classification Threshold: {threshold:.4f}\n"
+    report_str += f"Threshold Source: {threshold_info['source']}\n"
+    report_str += f"Threshold Objective: {threshold_info['objective']}\n"
+    report_str += f"ROC AUC Score: {metrics['ranking']['roc_auc']:.4f}\n"
+    report_str += f"Average Precision (PR AUC): {metrics['ranking']['average_precision']:.4f}\n"
+    report_str += f"Brier Score: {metrics['ranking']['brier_score']:.4f}\n"
+    report_str += f"Precision: {metrics['threshold_metrics']['precision']:.4f}\n"
+    report_str += f"Recall: {metrics['threshold_metrics']['recall']:.4f}\n"
+    report_str += f"F1 Score: {metrics['threshold_metrics']['f1']:.4f}\n"
+    report_str += f"Accuracy: {metrics['threshold_metrics']['accuracy']:.4f}\n"
+    report_str += "Submission Note: Kaggle submission uses probabilities, not thresholded labels.\n\n"
+    report_str += "Classification Report:\n"
+    report_str += classification_report(y_true, y_pred_bin, digits=eval_config["report_digits"], zero_division=0)
+
+    models_dir.mkdir(parents=True, exist_ok=True)
+    model_artifact_path(models_dir, config, "evaluation_report").write_text(report_str, encoding="utf-8")
+    with open(model_artifact_path(models_dir, config, "metrics"), "w", encoding="utf-8") as file:
+        yaml.safe_dump(metrics, file, sort_keys=False)
+    with open(model_artifact_path(models_dir, config, "threshold"), "w", encoding="utf-8") as file:
+        yaml.safe_dump(threshold_info, file, sort_keys=False)
+    if config["training"]["reports"]["save_threshold_table"]:
+        threshold_table.to_csv(model_artifact_path(models_dir, config, "threshold_table"), index=False)
+    if config["training"]["reports"]["save_lift_table"]:
+        lift_table.to_csv(model_artifact_path(models_dir, config, "lift_table"), index=False)
+    save_oof_predictions(y_true, y_pred_prob, ids, models_dir, config)
+    save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_name, models_dir, config, evaluation_scope)
+    return threshold_info
 
 
 def suggest_params(trial, search_space):
@@ -500,40 +757,6 @@ def cross_validated_single_predictions(X, y, estimator_config, config, desc, is_
     return oof_preds
 
 
-def cross_validated_ensemble_predictions(X, y, estimators, config):
-    cv = get_cv(config)
-    oof_preds = np.full(len(X), np.nan)
-    total_weight = sum(estimator["weight"] for estimator in estimators)
-
-    for train_idx, valid_idx in tqdm(cv.split(X, y), total=config["training"]["cv_splits"], desc="Ensemble Folds"):
-        X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
-        X_valid = X.iloc[valid_idx]
-        preprocessor = TrainingPreprocessor(config, feature_selection_enabled=True)
-        X_train_processed = preprocessor.fit_transform(X_train, y_train)
-        X_valid_processed = preprocessor.transform(X_valid)
-
-        sampler = get_imbalance_sampler(config)
-        if sampler is not None:
-            X_train_processed, y_train = sampler.fit_resample(X_train_processed, y_train)
-
-        fold_preds = np.zeros(len(X_valid))
-        for estimator_config in estimators:
-            model, _ = fit_model(
-                estimator_config["name"],
-                estimator_config.get("params", {}),
-                config,
-                X_train_processed,
-                y_train,
-                False,
-            )
-            fold_preds += model.predict_proba(X_valid_processed)[:, 1] * (estimator_config["weight"] / total_weight)
-        oof_preds[valid_idx] = fold_preds
-
-    if np.isnan(oof_preds).any():
-        raise ValueError("OOF predictions incomplete; at least one row was not predicted.")
-    return oof_preds
-
-
 def fit_final_single_model(X, y, estimator_config, config, models_dir, model_name):
     preprocessor = TrainingPreprocessor(config, feature_selection_enabled=True)
     X_processed = preprocessor.fit_transform(X, y)
@@ -556,38 +779,6 @@ def fit_final_single_model(X, y, estimator_config, config, models_dir, model_nam
     return model, preprocessor, accelerator
 
 
-def fit_final_ensemble(X, y, estimators, config, models_dir):
-    preprocessor = TrainingPreprocessor(config, feature_selection_enabled=True)
-    X_processed = preprocessor.fit_transform(X, y)
-
-    sampler = get_imbalance_sampler(config)
-    y_fit = y
-    if sampler is not None:
-        X_processed, y_fit = sampler.fit_resample(X_processed, y_fit)
-
-    joblib.dump(preprocessor, model_artifact_path(models_dir, config, "preprocessor"))
-
-    final_models = []
-    accelerators = {}
-    for estimator_config in estimators:
-        model, accelerator = fit_model(
-            estimator_config["name"],
-            estimator_config.get("params", {}),
-            config,
-            X_processed,
-            y_fit,
-            False,
-        )
-        joblib.dump(
-            model,
-            model_artifact_path(models_dir, config, "ensemble_model", model_name=estimator_config["name"]),
-        )
-        final_models.append((model, estimator_config["weight"]))
-        accelerators[estimator_config["name"]] = accelerator
-
-    return final_models, preprocessor, accelerators
-
-
 def configure_optuna_logging(config):
     level_name = str(config["training"]["verbosity"].get("optuna", "INFO")).upper()
     levels = {
@@ -605,8 +796,11 @@ def run_training(config):
     print(f"Initializing training pipeline ({config['training']['run_mode']})...")
     t_config = config["training"]
     seed = config["globals"]["random_state"]
-    models_dir = Path(t_config["artifact_paths"]["models_dir"])
-    models_dir.mkdir(parents=True, exist_ok=True)
+    models_root = Path(t_config["artifact_paths"]["models_dir"])
+    models_root.mkdir(parents=True, exist_ok=True)
+    models_dir, experiment_id, timestamp = create_experiment_dir(models_root, config)
+    save_config_snapshot(models_dir, config)
+    print(f"Experiment artifacts: {models_dir}")
     configure_optuna_logging(config)
 
     train_path = Path(config["data"]["final"]["train"])
@@ -617,32 +811,31 @@ def run_training(config):
         raise FileNotFoundError(f"Test data not found at {test_path}. Run --process first.")
 
     df = pd.read_csv(train_path)
+    train_ids = df[t_config["id_col"]]
     y = df[t_config["target_col"]]
     X = clean_column_names(df.drop(columns=[t_config["target_col"], t_config["id_col"]]))
-    metadata = build_run_metadata(config, X, y, train_path)
+    metadata = build_run_metadata(config, X, y, train_path, experiment_id, timestamp)
     validate_reusable_artifacts(models_dir, config, metadata)
 
-    model_type = t_config["models"]["type"]
-    if model_type == "single":
-        run_single_phases(X, y, config, models_dir, seed, metadata)
-    elif model_type == "ensemble":
-        run_ensemble_phases(X, y, config, models_dir, metadata)
-    else:
-        raise ValueError(f"Unknown training.models.type: {model_type}")
+    run_single_phases(X, y, train_ids, config, models_dir, seed, metadata)
 
-    metadata["selected_accelerators"] = {f"{name}:{mode}": acc for (name, mode), acc in ACCELERATOR_CACHE.items()}
+    metadata["selected_accelerators"].update(
+        {f"{name}:{mode}": acc for (name, mode), acc in ACCELERATOR_CACHE.items()}
+    )
     write_run_metadata(models_dir, config, metadata)
+    write_latest_experiment_pointer(models_root, config, models_dir)
 
 
-def run_single_phases(X, y, config, models_dir, seed, metadata):
+def run_single_phases(X, y, ids, config, models_dir, seed, metadata):
     t_config = config["training"]
     phases = t_config["phases"]
-    est_config = t_config["models"]["estimators"][0]
+    est_config = get_primary_estimator_config(config)
     name = est_config["name"]
     best_config = est_config
 
     if phases["search"]:
-        best_config = run_single_search(X, y, config, models_dir, seed, est_config)
+        best_config, search_threshold = run_single_search(X, y, ids, config, models_dir, seed, est_config)
+        metadata["chosen_threshold"] = search_threshold
     if phases["validate"] and t_config["run_full_oof_validation"]:
         report_name = f"{name}_optuna"
         print("Scoring best model with full-data OOF validation...")
@@ -655,26 +848,35 @@ def run_single_phases(X, y, config, models_dir, seed, metadata):
             is_trial=False,
             feature_selection_enabled=True,
         )
-        save_evaluation_report(y, oof_preds, report_name, models_dir, config, "out_of_fold")
+        metadata["chosen_threshold"] = save_evaluation_report(
+            y,
+            oof_preds,
+            report_name,
+            models_dir,
+            config,
+            "out_of_fold",
+            ids=ids,
+        )
     elif phases["validate"]:
         print("Skipping full-data OOF validation by run profile.")
 
     if phases["final_fit"]:
         model, preprocessor, accelerator = fit_final_single_model(X, y, best_config, config, models_dir, name)
         metadata["selected_accelerators"][name] = accelerator
-        predict_test_and_submit(model, config, preprocessor=preprocessor, is_ensemble=False)
+        predict_test_and_submit(model, config, models_dir, preprocessor=preprocessor)
 
 
-def run_single_search(X, y, config, models_dir, seed, est_config):
+def run_single_search(X, y, ids, config, models_dir, seed, est_config):
     t_config = config["training"]
     name = est_config["name"]
     search_space = est_config.get("search_space", {})
     subsample_rate = t_config["optuna_subsample_rate"]
 
     print(f"Search phase: {name}, {t_config['optuna_n_trials']} trials, {subsample_rate * 100:.1f}% data.")
-    X_search, _, y_search, _ = train_test_split(
+    X_search, _, y_search, _, ids_search, _ = train_test_split(
         X,
         y,
+        ids,
         train_size=subsample_rate,
         stratify=y,
         random_state=seed,
@@ -715,28 +917,19 @@ def run_single_search(X, y, config, models_dir, seed, est_config):
         is_trial=True,
         feature_selection_enabled=feature_selection_enabled,
     )
-    save_evaluation_report(y_search, search_preds, f"{name}_search", models_dir, config, "search_subsample_cv")
-    return best_config
+    threshold_info = save_evaluation_report(
+        y_search,
+        search_preds,
+        f"{name}_search",
+        models_dir,
+        config,
+        "search_subsample_cv",
+        ids=ids_search,
+    )
+    return best_config, threshold_info
 
 
-def run_ensemble_phases(X, y, config, models_dir, metadata):
-    phases = config["training"]["phases"]
-    estimators = config["training"]["models"]["estimators"]
-
-    if phases["validate"] and config["training"]["run_full_oof_validation"]:
-        print("Scoring ensemble with full-data OOF validation...")
-        oof_preds = cross_validated_ensemble_predictions(X, y, estimators, config)
-        save_evaluation_report(y, oof_preds, "ensemble_cv_oof", models_dir, config, "out_of_fold")
-    elif phases["validate"]:
-        print("Skipping full-data OOF validation by run profile.")
-
-    if phases["final_fit"]:
-        final_models, preprocessor, accelerators = fit_final_ensemble(X, y, estimators, config, models_dir)
-        metadata["selected_accelerators"].update(accelerators)
-        predict_test_and_submit(final_models, config, preprocessor=preprocessor, is_ensemble=True)
-
-
-def predict_test_and_submit(model_obj, config, preprocessor=None, is_ensemble=False):
+def predict_test_and_submit(model_obj, config, models_dir, preprocessor=None):
     print("Generating predictions...")
     test_path = Path(config["data"]["final"]["test"])
     if not test_path.exists():
@@ -751,7 +944,6 @@ def predict_test_and_submit(model_obj, config, preprocessor=None, is_ensemble=Fa
     ids = df_test[id_col]
     X_test = clean_column_names(df_test.drop(columns=[id_col]))
 
-    models_dir = Path(config["training"]["artifact_paths"]["models_dir"])
     if preprocessor is None:
         preprocessor_path = model_artifact_path(models_dir, config, "preprocessor")
         if not preprocessor_path.exists():
@@ -760,16 +952,9 @@ def predict_test_and_submit(model_obj, config, preprocessor=None, is_ensemble=Fa
 
     X_test = preprocessor.transform(X_test)
 
-    if not is_ensemble:
-        preds = model_obj.predict_proba(X_test)[:, 1]
-    else:
-        preds = np.zeros(len(X_test))
-        total_weight = sum(weight for _, weight in model_obj)
-        for model, weight in model_obj:
-            preds += model.predict_proba(X_test)[:, 1] * (weight / total_weight)
+    preds = model_obj.predict_proba(X_test)[:, 1]
 
-    submission_path = Path(config["training"]["artifact_paths"]["submission"])
-    submission_path.parent.mkdir(parents=True, exist_ok=True)
+    submission_path = model_artifact_path(models_dir, config, "submission")
     submission = pd.DataFrame({id_col: ids, target_col: preds})
     if len(submission) != len(df_test):
         raise ValueError("Submission row count does not match test row count.")

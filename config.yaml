@@ -31,14 +31,24 @@ data:
       DAYS_BIRTH: "Float64"
       DAYS_REGISTRATION: "Float64"
       DAYS_ID_PUBLISH: "Float64"
+      DAYS_LAST_PHONE_CHANGE: "Float64"
       MONTHS_BALANCE: "Float64"
       DAYS_CREDIT: "Float64"
+      DAYS_CREDIT_ENDDATE: "Float64"
+      DAYS_ENDDATE_FACT: "Float64"
       AMT_CREDIT_SUM: "Float64"
       AMT_CREDIT_SUM_DEBT: "Float64"
       AMT_CREDIT_SUM_LIMIT: "Float64"
       AMT_CREDIT_SUM_OVERDUE: "Float64"
       CNT_INSTALMENT: "Float64"
       CNT_INSTALMENT_FUTURE: "Float64"
+      CNT_PAYMENT: "Float64"
+      AMT_DOWN_PAYMENT: "Float64"
+      RATE_DOWN_PAYMENT: "Float64"
+      AMT_TOTAL_RECEIVABLE: "Float64"
+      AMT_RECEIVABLE_PRINCIPAL: "Float64"
+      AMT_RECIVABLE: "Float64"
+      CNT_DRAWINGS_CURRENT: "Float64"
       SK_DPD: "Float64"
       SK_DPD_DEF: "Float64"
 
@@ -55,6 +65,7 @@ data:
   final:
     train: "Data/final/final_train.csv"
     test: "Data/final/final_test.csv"
+    feature_manifest: "Data/final/feature_manifest.yaml"
 
 pipeline:
   high_null_threshold: 0.6
@@ -74,15 +85,36 @@ pipeline:
     frequency_unknown_value: 1
     frequency_normalize: false
   anomaly_fix:
+    days_employed_col: "DAYS_EMPLOYED"
     days_employed: 365243
   feature_engineering:
+    enabled_sets:
+      - "application_extended"
+      - "bureau_extended"
+      - "previous_interest"
+      - "last_n_aggregations"
+      - "recency_windows"
+      - "pos_cash_cleanup"
+      - "missing_indicators"
+    day_unit: 365.25
+    last_n_records: [ 1, 3, 5, 10 ]
+    application_source_cols:
+      days_birth: "DAYS_BIRTH"
+      amt_goods_price: "AMT_GOODS_PRICE"
+      amt_credit: "AMT_CREDIT"
     document_flag_prefix: "FLAG_DOCUMENT_"
     output_features:
       document_count: "DOCUMENT_COUNT"
       ext_sources_mean: "EXT_SOURCES_MEAN"
       ext_sources_prod: "EXT_SOURCES_PROD"
       ext_sources_std: "EXT_SOURCES_STD"
+      ext_sources_min: "EXT_SOURCES_MIN"
+      ext_sources_max: "EXT_SOURCES_MAX"
+      ext_sources_range: "EXT_SOURCES_RANGE"
       enquiry_total: "AMT_REQ_CREDIT_BUREAU_TOTAL"
+      age_years: "AGE_YEARS"
+      down_payment: "DOWN_PAYMENT"
+      down_payment_ratio: "DOWN_PAYMENT_RATIO"
     base_ratio_features:
       - name: "DAYS_EMPLOYED_PERC"
         numerator: "DAYS_EMPLOYED"
@@ -103,8 +135,35 @@ pipeline:
       - name: "GOODS_CREDIT_RATIO"
         numerator: "AMT_GOODS_PRICE"
         denominator: "AMT_CREDIT"
-    recency_months: [ 6, 12 ] # For time-based aggregations (MONTHS_BALANCE)
-    recency_days_prev: [ 365, 730 ] # For previous_application recency (DAYS_DECISION)
+    extended_ratio_features:
+      - name: "CREDIT_TO_ANNUITY_RATIO"
+        numerator: "AMT_CREDIT"
+        denominator: "AMT_ANNUITY"
+      - name: "CREDIT_TO_GOODS_RATIO"
+        numerator: "AMT_CREDIT"
+        denominator: "AMT_GOODS_PRICE"
+      - name: "REGISTRATION_BIRTH_RATIO"
+        numerator: "DAYS_REGISTRATION"
+        denominator: "DAYS_BIRTH"
+      - name: "ID_PUBLISH_BIRTH_RATIO"
+        numerator: "DAYS_ID_PUBLISH"
+        denominator: "DAYS_BIRTH"
+      - name: "PHONE_CHANGE_BIRTH_RATIO"
+        numerator: "DAYS_LAST_PHONE_CHANGE"
+        denominator: "DAYS_BIRTH"
+    recency_months: [ 3, 6, 12, 24 ]
+    recency_days: [ 60, 90, 180, 365, 730, 1000 ]
+    bureau_recency_days: [ 365, 730, 1095 ]
+    ext_source_interaction_bases:
+      - "CREDIT_INCOME_RATIO"
+      - "ANNUITY_INCOME_RATIO"
+    missing_indicator_cols:
+      - "EXT_SOURCE_1"
+      - "EXT_SOURCE_2"
+      - "EXT_SOURCE_3"
+      - "AMT_ANNUITY"
+      - "AMT_GOODS_PRICE"
+      - "DAYS_LAST_PHONE_CHANGE"
     frequency_encoding_cols:
       - "ORGANIZATION_TYPE"
       - "OCCUPATION_TYPE"
@@ -128,8 +187,15 @@ pipeline:
       days_credit_col: "DAYS_CREDIT"
       amt_credit_sum_col: "AMT_CREDIT_SUM"
       amt_credit_sum_debt_col: "AMT_CREDIT_SUM_DEBT"
+      amt_credit_sum_limit_col: "AMT_CREDIT_SUM_LIMIT"
+      amt_credit_sum_overdue_col: "AMT_CREDIT_SUM_OVERDUE"
+      days_credit_enddate_col: "DAYS_CREDIT_ENDDATE"
+      days_enddate_fact_col: "DAYS_ENDDATE_FACT"
+      debt_credit_ratio_col: "DEBT_CREDIT_RATIO"
       credit_active_col: "CREDIT_ACTIVE"
-      active_value: "Active"
+      status_splits:
+        active: "Active"
+        closed: "Closed"
     previous_application:
       prefix: "prev_"
       id_col: "SK_ID_PREV"
@@ -139,11 +205,29 @@ pipeline:
       status_col: "NAME_CONTRACT_STATUS"
       days_decision_col: "DAYS_DECISION"
       amt_annuity_col: "AMT_ANNUITY"
+      cnt_payment_col: "CNT_PAYMENT"
+      amt_down_payment_col: "AMT_DOWN_PAYMENT"
+      rate_down_payment_col: "RATE_DOWN_PAYMENT"
+      total_payment_col: "PREV_TOTAL_PAYMENT"
+      simple_interest_col: "PREV_SIMPLE_INTEREST"
+      credit_to_annuity_col: "PREV_CREDIT_TO_ANNUITY"
+      status_values:
+        approved: "Approved"
+        refused: "Refused"
+        canceled: "Canceled"
     pos_cash:
       prefix: "pos_"
       id_col: "SK_ID_PREV"
       month_col: "MONTHS_BALANCE"
       dpd_col: "SK_DPD"
+      cnt_instalment_col: "CNT_INSTALMENT"
+      cnt_instalment_future_col: "CNT_INSTALMENT_FUTURE"
+      cleanup:
+        enabled: true
+        min_values:
+          SK_DPD: 0
+          CNT_INSTALMENT: 0
+          CNT_INSTALMENT_FUTURE: 0
     installments:
       prefix: "inst_"
       instalment_version_col: "NUM_INSTALMENT_VERSION"
@@ -163,6 +247,9 @@ pipeline:
       drawings_col: "AMT_DRAWINGS_CURRENT"
       dpd_col: "SK_DPD"
       utilization_col: "UTILIZATION"
+      total_receivable_col: "AMT_TOTAL_RECEIVABLE"
+      receivable_principal_col: "AMT_RECEIVABLE_PRINCIPAL"
+      drawings_count_col: "CNT_DRAWINGS_CURRENT"
 training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
@@ -193,6 +280,21 @@ training:
   artifact_reuse:
     allow_stale_artifacts: false
     metadata: "training_run_metadata.yaml"
+  experiment:
+    name:
+    folder_template: "{timestamp}_{run_mode}_{primary_model}"
+  threshold_tuning:
+    enabled: true
+    objective: "f1"
+    grid:
+      min: 0.01
+      max: 0.99
+      step: 0.01
+  reports:
+    save_oof_predictions: true
+    save_threshold_table: true
+    save_lift_table: true
+    save_curves: true
   acceleration:
     preferred: "gpu"
     fallback: "cpu"
@@ -242,13 +344,24 @@ training:
 
   artifact_paths:
     models_dir: "Models"
-    submission: "Data/final/submission.csv"
+    experiments_dir: "experiments"
+    latest_experiment: "latest_experiment.txt"
+    config_snapshot: "config_snapshot.yaml"
+    submission: "submission.csv"
     preprocessor: "training_preprocessor.pkl"
-    best_params: "{model_name}_best_params.yaml"
-    single_model: "{model_name}_optuna_best_model.pkl"
-    ensemble_model: "{model_name}_ensemble_model.pkl"
-    evaluation_report: "{model_name}_evaluation_report.txt"
-    confusion_matrix: "{model_name}_confusion_matrix.png"
+    threshold: "threshold.yaml"
+    best_params: "best_params.yaml"
+    single_model: "final_model.pkl"
+    evaluation_report: "reports/evaluation_report.txt"
+    metrics: "reports/metrics.yaml"
+    oof_predictions: "reports/oof_predictions.csv"
+    threshold_table: "reports/threshold_table.csv"
+    lift_table: "reports/lift_deciles.csv"
+    confusion_matrix: "plots/confusion_matrix.png"
+    roc_curve: "plots/roc_curve.png"
+    pr_curve: "plots/pr_curve.png"
+    calibration_curve: "plots/calibration_curve.png"
+    lift_chart: "plots/lift_chart.png"
 
   evaluation:
     report_digits: 4
@@ -277,11 +390,9 @@ training:
         verbose: -1
 
   models:
-    type: "single"
-
-    estimators:
+    primary: "catboost"
+    candidates:
       - name: "catboost"
-        weight: 1
         params:
           iterations: 1000
           learning_rate: 0.05
@@ -298,7 +409,6 @@ training:
           model__l2_leaf_reg: { type: "float", low: 1, high: 10 }
 
       - name: "lightgbm"
-        weight: 1
         params:
           n_estimators: 1000
           learning_rate: 0.05
@@ -314,7 +424,6 @@ training:
           model__n_estimators: { type: "int", low: 500, high: 2000 }
 
       - name: "xgboost"
-        weight: 1
         params:
           n_estimators: 1000
           learning_rate: 0.05
