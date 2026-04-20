@@ -253,7 +253,7 @@ pipeline:
 training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
-  run_mode: "balanced_deep"
+  run_mode: "max_quality"
   run_profiles:
     fast_dev:
       cv_splits: 2
@@ -304,7 +304,7 @@ training:
     save_feature_importance: true
     feature_importance_top_n: 50
   model_comparison:
-    enabled: true
+    enabled: false
     candidates: [ "catboost", "lightgbm" ]
     max_trials_per_model: 5
     cv_splits: 3
@@ -464,3 +464,5 @@ training:
           model__n_estimators: { type: "int", low: 500, high: 2000 }
           model__learning_rate: { type: "float", low: 0.01, high: 0.1, log: true }
           model__max_depth: { type: "int", low: 4, high: 10 }
+          model__gamma: { type: "float", low: 0, high: 10 }
+          model__reg_alpha: { type: "float", low: 0, high: 10 }

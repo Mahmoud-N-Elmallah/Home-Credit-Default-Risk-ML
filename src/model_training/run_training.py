@@ -361,6 +361,7 @@ def resolve_model_accelerator(name, params, config, X, y, is_trial):
     X_sample, y_sample = capability_sample(X, y, config)
     params_no_speed, _ = split_speed_params(params, name)
     test_params = params_no_speed.copy()
+    test_params.pop("early_stopping_rounds", None)
     if name == "catboost":
         test_params["iterations"] = min(int(test_params.get("iterations", 10)), 2)
     elif name in ["lightgbm", "xgboost"]:
