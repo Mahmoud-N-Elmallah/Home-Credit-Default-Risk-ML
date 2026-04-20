@@ -195,6 +195,7 @@ def preprocess_base(train: pl.DataFrame, test: pl.DataFrame, config):
     """Step 2 - Preprocess base application tables."""
     print("Preprocessing base tables...")
     fe_config = config["pipeline"]["feature_engineering"]
+    output_features = fe_config["output_features"]
     anomaly_val = config["pipeline"]["anomaly_fix"]["days_employed"]
     eps = float(config["globals"]["division_epsilon"])
 
@@ -218,7 +219,7 @@ def preprocess_base(train: pl.DataFrame, test: pl.DataFrame, config):
         doc_prefix = fe_config["document_flag_prefix"]
         doc_cols = [col for col in df.columns if col.startswith(doc_prefix)]
         if doc_cols:
-            df = df.with_columns(pl.sum_horizontal(doc_cols).alias("DOCUMENT_COUNT"))
+            df = df.with_columns(pl.sum_horizontal(doc_cols).alias(output_features["document_count"]))
 
         return df
 
@@ -234,41 +235,51 @@ def agg_bureau(bureau: pl.LazyFrame, bureau_balance: pl.LazyFrame, config):
     print("Aggregating bureau...")
     id_curr = config["training"]["id_col"]
     fe_config = config["pipeline"]["feature_engineering"]
+    agg_config = config["pipeline"]["aggregations"]
+    bb_config = agg_config["bureau_balance"]
+    bureau_config = agg_config["bureau"]
+    bb_id = bb_config["id_col"]
+    bb_status = bb_config["status_col"]
+    bb_month = bb_config["month_col"]
+    days_credit = bureau_config["days_credit_col"]
+    amt_credit_sum = bureau_config["amt_credit_sum_col"]
+    amt_credit_sum_debt = bureau_config["amt_credit_sum_debt_col"]
+    credit_active = bureau_config["credit_active_col"]
+    active_val = bureau_config["active_value"]
 
-    status_exprs = get_proportions(bureau_balance, "STATUS", "STATUS")
-    bb_agg = bureau_balance.group_by("SK_ID_BUREAU").agg(
+    status_exprs = get_proportions(bureau_balance, bb_status, bb_status)
+    bb_agg = bureau_balance.group_by(bb_id).agg(
         [
-            pl.col("MONTHS_BALANCE").count().alias("MONTHS_BALANCE_count"),
-            pl.col("MONTHS_BALANCE").min().alias("MONTHS_BALANCE_min"),
-            pl.col("MONTHS_BALANCE").max().alias("MONTHS_BALANCE_max"),
+            pl.col(bb_month).count().alias(f"{bb_month}_count"),
+            pl.col(bb_month).min().alias(f"{bb_month}_min"),
+            pl.col(bb_month).max().alias(f"{bb_month}_max"),
         ] + status_exprs
     )
 
     for months in fe_config["recency_months"]:
-        bb_recent = bureau_balance.filter(pl.col("MONTHS_BALANCE") >= -months)
-        status_exprs_recent = get_proportions(bb_recent, "STATUS", f"STATUS_{months}M")
-        bb_agg_recent = bb_recent.group_by("SK_ID_BUREAU").agg(status_exprs_recent)
-        bb_agg = bb_agg.join(bb_agg_recent, on="SK_ID_BUREAU", how="left")
+        bb_recent = bureau_balance.filter(pl.col(bb_month) >= -months)
+        status_exprs_recent = get_proportions(bb_recent, bb_status, f"{bb_status}_{months}M")
+        bb_agg_recent = bb_recent.group_by(bb_id).agg(status_exprs_recent)
+        bb_agg = bb_agg.join(bb_agg_recent, on=bb_id, how="left")
 
-    bureau = bureau.join(bb_agg, on="SK_ID_BUREAU", how="left")
+    bureau = bureau.join(bb_agg, on=bb_id, how="left")
 
-    bb_agg_cols = [col for col in bb_agg.collect_schema().names() if col != "SK_ID_BUREAU"]
+    bb_agg_cols = [col for col in bb_agg.collect_schema().names() if col != bb_id]
     bb_mean_exprs = [pl.col(col).mean().alias(f"{col}_mean") for col in bb_agg_cols]
-    active_val = fe_config["categories"]["bureau_active"]
 
     b_agg = bureau.group_by(id_curr).agg(
         [
-            pl.col("DAYS_CREDIT").min().alias("DAYS_CREDIT_min"),
-            pl.col("DAYS_CREDIT").max().alias("DAYS_CREDIT_max"),
-            pl.col("DAYS_CREDIT").mean().alias("DAYS_CREDIT_mean"),
-            pl.col("AMT_CREDIT_SUM").sum().alias("AMT_CREDIT_SUM_sum"),
-            pl.col("AMT_CREDIT_SUM_DEBT").sum().alias("AMT_CREDIT_SUM_DEBT_sum"),
-            pl.col("CREDIT_ACTIVE").eq(active_val).sum().alias("ACTIVE_LOANS_COUNT"),
-            pl.col("CREDIT_ACTIVE").eq(active_val).mean().alias("CREDIT_ACTIVE_prop_active"),
+            pl.col(days_credit).min().alias(f"{days_credit}_min"),
+            pl.col(days_credit).max().alias(f"{days_credit}_max"),
+            pl.col(days_credit).mean().alias(f"{days_credit}_mean"),
+            pl.col(amt_credit_sum).sum().alias(f"{amt_credit_sum}_sum"),
+            pl.col(amt_credit_sum_debt).sum().alias(f"{amt_credit_sum_debt}_sum"),
+            pl.col(credit_active).eq(active_val).sum().alias("ACTIVE_LOANS_COUNT"),
+            pl.col(credit_active).eq(active_val).mean().alias(f"{credit_active}_prop_active"),
         ] + bb_mean_exprs
     )
 
-    rename_dict = {col: f"bureau_{col}" for col in b_agg.collect_schema().names() if col != id_curr}
+    rename_dict = {col: f"{bureau_config['prefix']}{col}" for col in b_agg.collect_schema().names() if col != id_curr}
     return b_agg.rename(rename_dict)
 
 
@@ -277,35 +288,43 @@ def agg_prev_app(prev_app: pl.LazyFrame, config):
     print("Aggregating previous apps...")
     id_curr = config["training"]["id_col"]
     fe_config = config["pipeline"]["feature_engineering"]
+    prev_config = config["pipeline"]["aggregations"]["previous_application"]
+    prev_id = prev_config["id_col"]
+    amt_application = prev_config["amt_application_col"]
+    amt_credit = prev_config["amt_credit_col"]
+    app_credit_gap = prev_config["app_credit_gap_col"]
+    status_col = prev_config["status_col"]
+    days_decision = prev_config["days_decision_col"]
+    amt_annuity = prev_config["amt_annuity_col"]
 
     prev_app = prev_app.with_columns(
-        (pl.col("AMT_APPLICATION") - pl.col("AMT_CREDIT")).alias("APP_CREDIT_GAP")
+        (pl.col(amt_application) - pl.col(amt_credit)).alias(app_credit_gap)
     )
-    status_exprs = get_proportions(prev_app, "NAME_CONTRACT_STATUS", "NAME_CONTRACT_STATUS")
+    status_exprs = get_proportions(prev_app, status_col, status_col)
 
     agg = prev_app.group_by(id_curr).agg(
         [
-            pl.col("SK_ID_PREV").count().alias("SK_ID_PREV_count"),
-            pl.col("AMT_ANNUITY").mean().alias("AMT_ANNUITY_mean"),
-            pl.col("AMT_CREDIT").sum().alias("AMT_CREDIT_sum"),
-            pl.col("APP_CREDIT_GAP").sum().alias("APP_CREDIT_GAP_sum"),
-            pl.col("APP_CREDIT_GAP").mean().alias("APP_CREDIT_GAP_mean"),
-            pl.col("DAYS_DECISION").min().alias("DAYS_DECISION_min"),
-            pl.col("DAYS_DECISION").mean().alias("DAYS_DECISION_mean"),
+            pl.col(prev_id).count().alias(f"{prev_id}_count"),
+            pl.col(amt_annuity).mean().alias(f"{amt_annuity}_mean"),
+            pl.col(amt_credit).sum().alias(f"{amt_credit}_sum"),
+            pl.col(app_credit_gap).sum().alias(f"{app_credit_gap}_sum"),
+            pl.col(app_credit_gap).mean().alias(f"{app_credit_gap}_mean"),
+            pl.col(days_decision).min().alias(f"{days_decision}_min"),
+            pl.col(days_decision).mean().alias(f"{days_decision}_mean"),
         ] + status_exprs
     )
 
     for days in fe_config["recency_days_prev"]:
-        recent = prev_app.filter(pl.col("DAYS_DECISION") >= -days)
+        recent = prev_app.filter(pl.col(days_decision) >= -days)
         recent_agg = recent.group_by(id_curr).agg(
             [
-                pl.col("SK_ID_PREV").count().alias(f"SK_ID_PREV_count_{days}D"),
-                pl.col("APP_CREDIT_GAP").mean().alias(f"APP_CREDIT_GAP_mean_{days}D"),
+                pl.col(prev_id).count().alias(f"{prev_id}_count_{days}D"),
+                pl.col(app_credit_gap).mean().alias(f"{app_credit_gap}_mean_{days}D"),
             ]
         )
         agg = agg.join(recent_agg, on=id_curr, how="left")
 
-    rename_dict = {col: f"prev_{col}" for col in agg.collect_schema().names() if col != id_curr}
+    rename_dict = {col: f"{prev_config['prefix']}{col}" for col in agg.collect_schema().names() if col != id_curr}
     return agg.rename(rename_dict)
 
 
@@ -314,26 +333,30 @@ def agg_pos_cash(pos_cash: pl.LazyFrame, config):
     print("Aggregating POS cash...")
     id_curr = config["training"]["id_col"]
     fe_config = config["pipeline"]["feature_engineering"]
+    pos_config = config["pipeline"]["aggregations"]["pos_cash"]
+    prev_id = pos_config["id_col"]
+    month_col = pos_config["month_col"]
+    dpd_col = pos_config["dpd_col"]
 
     agg = pos_cash.group_by(id_curr).agg(
         [
-            pl.col("SK_ID_PREV").n_unique().alias("SK_ID_PREV_nunique"),
-            pl.col("SK_DPD").max().alias("SK_DPD_max"),
-            pl.col("SK_DPD").mean().alias("SK_DPD_mean"),
+            pl.col(prev_id).n_unique().alias(f"{prev_id}_nunique"),
+            pl.col(dpd_col).max().alias(f"{dpd_col}_max"),
+            pl.col(dpd_col).mean().alias(f"{dpd_col}_mean"),
         ]
     )
 
     for months in fe_config["recency_months"]:
-        recent = pos_cash.filter(pl.col("MONTHS_BALANCE") >= -months)
+        recent = pos_cash.filter(pl.col(month_col) >= -months)
         recent_agg = recent.group_by(id_curr).agg(
             [
-                pl.col("SK_DPD").max().alias(f"SK_DPD_max_{months}M"),
-                pl.col("SK_DPD").mean().alias(f"SK_DPD_mean_{months}M"),
+                pl.col(dpd_col).max().alias(f"{dpd_col}_max_{months}M"),
+                pl.col(dpd_col).mean().alias(f"{dpd_col}_mean_{months}M"),
             ]
         )
         agg = agg.join(recent_agg, on=id_curr, how="left")
 
-    rename_dict = {col: f"pos_{col}" for col in agg.collect_schema().names() if col != id_curr}
+    rename_dict = {col: f"{pos_config['prefix']}{col}" for col in agg.collect_schema().names() if col != id_curr}
     return agg.rename(rename_dict)
 
 
@@ -342,43 +365,53 @@ def agg_installments(installments: pl.LazyFrame, config):
     print("Aggregating installments...")
     id_curr = config["training"]["id_col"]
     eps = float(config["globals"]["division_epsilon"])
+    inst_config = config["pipeline"]["aggregations"]["installments"]
+    instalment_version = inst_config["instalment_version_col"]
+    amt_payment = inst_config["amt_payment_col"]
+    amt_instalment = inst_config["amt_instalment_col"]
+    days_entry_payment = inst_config["days_entry_payment_col"]
+    days_instalment = inst_config["days_instalment_col"]
+    payment_perc = inst_config["payment_perc_col"]
+    payment_diff = inst_config["payment_diff_col"]
+    dpd_col = inst_config["dpd_col"]
+    dbd_col = inst_config["dbd_col"]
 
     installments = installments.with_columns(
         [
             (
-                pl.col("AMT_PAYMENT").cast(pl.Float64)
-                / (pl.col("AMT_INSTALMENT").cast(pl.Float64) + pl.lit(eps))
-            ).alias("PAYMENT_PERC"),
+                pl.col(amt_payment).cast(pl.Float64)
+                / (pl.col(amt_instalment).cast(pl.Float64) + pl.lit(eps))
+            ).alias(payment_perc),
             (
-                pl.col("AMT_INSTALMENT").cast(pl.Float64)
-                - pl.col("AMT_PAYMENT").cast(pl.Float64)
-            ).alias("PAYMENT_DIFF"),
+                pl.col(amt_instalment).cast(pl.Float64)
+                - pl.col(amt_payment).cast(pl.Float64)
+            ).alias(payment_diff),
             (
-                pl.col("DAYS_ENTRY_PAYMENT").cast(pl.Float64)
-                - pl.col("DAYS_INSTALMENT").cast(pl.Float64)
-            ).clip(lower_bound=0).alias("DPD"),
+                pl.col(days_entry_payment).cast(pl.Float64)
+                - pl.col(days_instalment).cast(pl.Float64)
+            ).clip(lower_bound=0).alias(dpd_col),
             (
-                pl.col("DAYS_INSTALMENT").cast(pl.Float64)
-                - pl.col("DAYS_ENTRY_PAYMENT").cast(pl.Float64)
-            ).clip(lower_bound=0).alias("DBD"),
+                pl.col(days_instalment).cast(pl.Float64)
+                - pl.col(days_entry_payment).cast(pl.Float64)
+            ).clip(lower_bound=0).alias(dbd_col),
         ]
     )
 
     agg = installments.group_by(id_curr).agg(
         [
-            pl.col("NUM_INSTALMENT_VERSION").n_unique().alias("NUM_INSTALMENT_VERSION_nunique"),
-            pl.col("DPD").max().alias("DPD_max"),
-            pl.col("DPD").mean().alias("DPD_mean"),
-            pl.col("DBD").max().alias("DBD_max"),
-            pl.col("DBD").mean().alias("DBD_mean"),
-            pl.col("PAYMENT_PERC").mean().alias("PAYMENT_PERC_mean"),
-            pl.col("PAYMENT_DIFF").sum().alias("PAYMENT_DIFF_sum"),
-            pl.col("PAYMENT_DIFF").mean().alias("PAYMENT_DIFF_mean"),
-            pl.col("AMT_INSTALMENT").sum().alias("AMT_INSTALMENT_sum"),
-            pl.col("AMT_PAYMENT").sum().alias("AMT_PAYMENT_sum"),
+            pl.col(instalment_version).n_unique().alias(f"{instalment_version}_nunique"),
+            pl.col(dpd_col).max().alias(f"{dpd_col}_max"),
+            pl.col(dpd_col).mean().alias(f"{dpd_col}_mean"),
+            pl.col(dbd_col).max().alias(f"{dbd_col}_max"),
+            pl.col(dbd_col).mean().alias(f"{dbd_col}_mean"),
+            pl.col(payment_perc).mean().alias(f"{payment_perc}_mean"),
+            pl.col(payment_diff).sum().alias(f"{payment_diff}_sum"),
+            pl.col(payment_diff).mean().alias(f"{payment_diff}_mean"),
+            pl.col(amt_instalment).sum().alias(f"{amt_instalment}_sum"),
+            pl.col(amt_payment).sum().alias(f"{amt_payment}_sum"),
         ]
     )
-    rename_dict = {col: f"inst_{col}" for col in agg.collect_schema().names() if col != id_curr}
+    rename_dict = {col: f"{inst_config['prefix']}{col}" for col in agg.collect_schema().names() if col != id_curr}
     return agg.rename(rename_dict)
 
 
@@ -388,36 +421,43 @@ def agg_cc_balance(cc_balance: pl.LazyFrame, config):
     id_curr = config["training"]["id_col"]
     eps = float(config["globals"]["division_epsilon"])
     fe_config = config["pipeline"]["feature_engineering"]
+    cc_config = config["pipeline"]["aggregations"]["credit_card_balance"]
+    month_col = cc_config["month_col"]
+    amt_balance = cc_config["amt_balance_col"]
+    credit_limit = cc_config["credit_limit_col"]
+    drawings = cc_config["drawings_col"]
+    dpd_col = cc_config["dpd_col"]
+    utilization = cc_config["utilization_col"]
 
     cc_balance = cc_balance.with_columns(
         (
-            pl.col("AMT_BALANCE").cast(pl.Float64)
-            / (pl.col("AMT_CREDIT_LIMIT_ACTUAL").cast(pl.Float64) + pl.lit(eps))
-        ).clip(0, 1).alias("UTILIZATION")
+            pl.col(amt_balance).cast(pl.Float64)
+            / (pl.col(credit_limit).cast(pl.Float64) + pl.lit(eps))
+        ).clip(0, 1).alias(utilization)
     )
 
     agg = cc_balance.group_by(id_curr).agg(
         [
-            pl.col("AMT_BALANCE").mean().alias("AMT_BALANCE_mean"),
-            pl.col("AMT_DRAWINGS_CURRENT").sum().alias("AMT_DRAWINGS_CURRENT_sum"),
-            pl.col("UTILIZATION").mean().alias("UTILIZATION_mean"),
-            pl.col("UTILIZATION").max().alias("UTILIZATION_max"),
-            pl.col("SK_DPD").max().alias("SK_DPD_max"),
+            pl.col(amt_balance).mean().alias(f"{amt_balance}_mean"),
+            pl.col(drawings).sum().alias(f"{drawings}_sum"),
+            pl.col(utilization).mean().alias(f"{utilization}_mean"),
+            pl.col(utilization).max().alias(f"{utilization}_max"),
+            pl.col(dpd_col).max().alias(f"{dpd_col}_max"),
         ]
     )
 
     for months in fe_config["recency_months"]:
-        recent = cc_balance.filter(pl.col("MONTHS_BALANCE") >= -months)
+        recent = cc_balance.filter(pl.col(month_col) >= -months)
         recent_agg = recent.group_by(id_curr).agg(
             [
-                pl.col("AMT_DRAWINGS_CURRENT").sum().alias(f"AMT_DRAWINGS_CURRENT_sum_{months}M"),
-                pl.col("UTILIZATION").mean().alias(f"UTILIZATION_mean_{months}M"),
-                pl.col("SK_DPD").max().alias(f"SK_DPD_max_{months}M"),
+                pl.col(drawings).sum().alias(f"{drawings}_sum_{months}M"),
+                pl.col(utilization).mean().alias(f"{utilization}_mean_{months}M"),
+                pl.col(dpd_col).max().alias(f"{dpd_col}_max_{months}M"),
             ]
         )
         agg = agg.join(recent_agg, on=id_curr, how="left")
 
-    rename_dict = {col: f"cc_{col}" for col in agg.collect_schema().names() if col != id_curr}
+    rename_dict = {col: f"{cc_config['prefix']}{col}" for col in agg.collect_schema().names() if col != id_curr}
     return agg.rename(rename_dict)
 
 
@@ -446,7 +486,11 @@ def impute_missing(train: pl.DataFrame, test: pl.DataFrame, config):
     """Step 5 - Missing value imputation."""
     print("Imputing missing values...")
     fill_values = config["pipeline"]["fill_values"]
-    aux_prefixes = config["pipeline"]["aux_table_prefixes"]
+    aux_prefixes = [
+        agg["prefix"]
+        for agg in config["pipeline"]["aggregations"].values()
+        if "prefix" in agg
+    ]
     target_col = config["training"]["target_col"]
     id_col = config["training"]["id_col"]
 
@@ -491,6 +535,7 @@ def add_global_features(df: pl.DataFrame, config):
     print("Adding global features...")
     eps = float(config["globals"]["division_epsilon"])
     fe_config = config["pipeline"]["feature_engineering"]
+    output_features = fe_config["output_features"]
     fill_value = config["pipeline"]["fill_values"]["generated_missing"]
 
     exprs = [
@@ -502,19 +547,22 @@ def add_global_features(df: pl.DataFrame, config):
     ext_cols = fe_config["ext_sources"]
     if all(col in df.columns for col in ext_cols):
         df = df.with_columns([pl.col(col).cast(pl.Float64, strict=False) for col in ext_cols])
-        exprs.append(pl.mean_horizontal(ext_cols).alias("EXT_SOURCES_MEAN"))
-        exprs.append((pl.col(ext_cols[0]) * pl.col(ext_cols[1]) * pl.col(ext_cols[2])).alias("EXT_SOURCES_PROD"))
+        exprs.append(pl.mean_horizontal(ext_cols).alias(output_features["ext_sources_mean"]))
+        exprs.append(
+            (pl.col(ext_cols[0]) * pl.col(ext_cols[1]) * pl.col(ext_cols[2]))
+            .alias(output_features["ext_sources_prod"])
+        )
         mean = pl.mean_horizontal(ext_cols)
         exprs.append(
             pl.mean_horizontal([(pl.col(col) - mean) ** 2 for col in ext_cols])
             .sqrt()
-            .alias("EXT_SOURCES_STD")
+            .alias(output_features["ext_sources_std"])
         )
 
     enq_cols = fe_config["enquiry_cols"]
     if all(col in df.columns for col in enq_cols):
         df = df.with_columns([pl.col(col).cast(pl.Float64, strict=False) for col in enq_cols])
-        exprs.append(pl.sum_horizontal(enq_cols).alias("AMT_REQ_CREDIT_BUREAU_TOTAL"))
+        exprs.append(pl.sum_horizontal(enq_cols).alias(output_features["enquiry_total"]))
 
     if exprs:
         df = df.with_columns(exprs)

@@ -89,18 +89,27 @@ def metadata_path(models_dir, config):
 
 
 def build_run_metadata(config, X, y, train_path):
+    phases = config["training"]["phases"]
+    metric_scopes = []
+    if phases["search"]:
+        metric_scopes.append("search_subsample_cv")
+    if phases["validate"] and config["training"]["run_full_oof_validation"]:
+        metric_scopes.append("out_of_fold")
+    if phases["final_fit"]:
+        metric_scopes.append("final_train_fit")
+
     return {
         "config_hash": stable_yaml_hash(config),
         "data_hashes": {str(train_path): file_hash(train_path)},
         "run_mode": config["training"]["run_mode"],
-        "phases": config["training"]["phases"],
+        "phases": phases,
         "cv_splits": config["training"]["cv_splits"],
         "optuna_n_trials": config["training"]["optuna_n_trials"],
         "optuna_subsample_rate": config["training"]["optuna_subsample_rate"],
         "row_count": int(len(X)),
         "feature_count": int(X.shape[1]),
         "positive_count": int(y.sum()),
-        "metric_scope": "out_of_fold",
+        "metric_scopes": metric_scopes,
         "selected_accelerators": {},
     }
 
@@ -172,7 +181,7 @@ def get_accelerator_params(model_name, config, accelerator):
 
 def accelerator_failure_is_retryable(error, config):
     message = str(error).lower()
-    keywords = get_acceleration_config(config).get("gpu_failure_keywords", [])
+    keywords = get_acceleration_config(config).get("retry_failure_keywords", [])
     return any(keyword.lower() in message for keyword in keywords)
 
 

@@ -75,15 +75,14 @@ pipeline:
     frequency_normalize: false
   anomaly_fix:
     days_employed: 365243
-  aux_table_prefixes:
-    - "bureau_"
-    - "prev_"
-    - "pos_"
-    - "inst_"
-    - "cc_"
-
   feature_engineering:
     document_flag_prefix: "FLAG_DOCUMENT_"
+    output_features:
+      document_count: "DOCUMENT_COUNT"
+      ext_sources_mean: "EXT_SOURCES_MEAN"
+      ext_sources_prod: "EXT_SOURCES_PROD"
+      ext_sources_std: "EXT_SOURCES_STD"
+      enquiry_total: "AMT_REQ_CREDIT_BUREAU_TOTAL"
     base_ratio_features:
       - name: "DAYS_EMPLOYED_PERC"
         numerator: "DAYS_EMPLOYED"
@@ -117,11 +116,53 @@ pipeline:
       - "AMT_REQ_CREDIT_BUREAU_MON"
       - "AMT_REQ_CREDIT_BUREAU_QRT"
       - "AMT_REQ_CREDIT_BUREAU_YEAR"
-    categories:
-      bureau_active: "Active"
-      prev_app_approved: "Approved"
-      prev_app_refused: "Refused"
-      prev_app_canceled: "Canceled"
+
+  aggregations:
+    bureau_balance:
+      id_col: "SK_ID_BUREAU"
+      status_col: "STATUS"
+      month_col: "MONTHS_BALANCE"
+    bureau:
+      prefix: "bureau_"
+      id_col: "SK_ID_BUREAU"
+      days_credit_col: "DAYS_CREDIT"
+      amt_credit_sum_col: "AMT_CREDIT_SUM"
+      amt_credit_sum_debt_col: "AMT_CREDIT_SUM_DEBT"
+      credit_active_col: "CREDIT_ACTIVE"
+      active_value: "Active"
+    previous_application:
+      prefix: "prev_"
+      id_col: "SK_ID_PREV"
+      amt_application_col: "AMT_APPLICATION"
+      amt_credit_col: "AMT_CREDIT"
+      app_credit_gap_col: "APP_CREDIT_GAP"
+      status_col: "NAME_CONTRACT_STATUS"
+      days_decision_col: "DAYS_DECISION"
+      amt_annuity_col: "AMT_ANNUITY"
+    pos_cash:
+      prefix: "pos_"
+      id_col: "SK_ID_PREV"
+      month_col: "MONTHS_BALANCE"
+      dpd_col: "SK_DPD"
+    installments:
+      prefix: "inst_"
+      instalment_version_col: "NUM_INSTALMENT_VERSION"
+      amt_payment_col: "AMT_PAYMENT"
+      amt_instalment_col: "AMT_INSTALMENT"
+      days_entry_payment_col: "DAYS_ENTRY_PAYMENT"
+      days_instalment_col: "DAYS_INSTALMENT"
+      payment_perc_col: "PAYMENT_PERC"
+      payment_diff_col: "PAYMENT_DIFF"
+      dpd_col: "DPD"
+      dbd_col: "DBD"
+    credit_card_balance:
+      prefix: "cc_"
+      month_col: "MONTHS_BALANCE"
+      amt_balance_col: "AMT_BALANCE"
+      credit_limit_col: "AMT_CREDIT_LIMIT_ACTUAL"
+      drawings_col: "AMT_DRAWINGS_CURRENT"
+      dpd_col: "SK_DPD"
+      utilization_col: "UTILIZATION"
 training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
@@ -156,7 +197,7 @@ training:
     preferred: "gpu"
     fallback: "cpu"
     retry_on_failure: true
-    gpu_failure_keywords:
+    retry_failure_keywords:
       - "gpu"
       - "cuda"
       - "opencl"
@@ -189,20 +230,15 @@ training:
           device: "cpu"
           n_jobs: -1
   optimization_metric: "roc_auc"
-  cv_splits: 3
   cv_shuffle: true
   classification_threshold: 0.5
-  imbalance_ratio: 11.3
-  optuna_n_trials: 10
   optuna_direction: "maximize"
-  optuna_subsample_rate: 0.35
 
   verbosity:
     catboost_trial: 0
     catboost_final: 50
     lgbm: -1
     optuna: "INFO"
-    search: 3
 
   artifact_paths:
     models_dir: "Models"

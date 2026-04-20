@@ -70,7 +70,7 @@ Run both:
 
 ## Configuration
 
-Project behavior is controlled from `config.yaml`: file paths, CSV parsing, feature engineering thresholds, categorical encoding, feature selection, imbalance handling, acceleration fallback, run profiles, training phases, model parameters, Optuna search spaces, artifact names, and evaluation settings.
+Project behavior is controlled from `config.yaml`: file paths, CSV parsing, feature engineering thresholds, aggregation source columns/prefixes, categorical encoding, feature selection, imbalance handling, acceleration fallback, run profiles, training phases, model parameters, Optuna search spaces, artifact names, and evaluation settings.
 
 Training uses `training.acceleration.preferred` first and retries `training.acceleration.fallback` when GPU support fails. Model-specific GPU/CPU parameters live under `training.acceleration.models`.
 
