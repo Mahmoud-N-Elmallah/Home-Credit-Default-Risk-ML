@@ -120,13 +120,11 @@ def create_experiment_dir(models_root, config):
         )
         experiment_id = slugify(experiment_id)
 
-    experiments_dir = Path(t_config["artifact_paths"]["experiments_dir"])
-    experiments_root = experiments_dir if experiments_dir.is_absolute() else models_root / experiments_dir
-    experiment_dir = experiments_root / experiment_id
+    experiment_dir = models_root / experiment_id
     suffix = 1
     while experiment_dir.exists():
         suffix += 1
-        experiment_dir = experiments_root / f"{experiment_id}_{suffix}"
+        experiment_dir = models_root / f"{experiment_id}_{suffix}"
     experiment_dir.mkdir(parents=True, exist_ok=False)
     return experiment_dir, experiment_dir.name, timestamp
 

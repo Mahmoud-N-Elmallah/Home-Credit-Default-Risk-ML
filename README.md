@@ -63,13 +63,13 @@ Run both:
 - `Data/final/final_test.csv`
 - `Data/final/feature_manifest.yaml`
 - `Models/latest_experiment.txt`
-- `Models/experiments/<experiment_id>/submission.csv`
-- `Models/experiments/<experiment_id>/final_model.pkl`
-- `Models/experiments/<experiment_id>/training_preprocessor.pkl`
-- `Models/experiments/<experiment_id>/training_run_metadata.yaml`
-- `Models/experiments/<experiment_id>/threshold.yaml`
-- `Models/experiments/<experiment_id>/reports/*`
-- `Models/experiments/<experiment_id>/plots/*`
+- `Models/<experiment_id>/submission.csv`
+- `Models/<experiment_id>/final_model.pkl`
+- `Models/<experiment_id>/training_preprocessor.pkl`
+- `Models/<experiment_id>/training_run_metadata.yaml`
+- `Models/<experiment_id>/threshold.yaml`
+- `Models/<experiment_id>/reports/*`
+- `Models/<experiment_id>/plots/*`
 
 ## Configuration
 

@@ -344,7 +344,6 @@ training:
 
   artifact_paths:
     models_dir: "Models"
-    experiments_dir: "experiments"
     latest_experiment: "latest_experiment.txt"
     config_snapshot: "config_snapshot.yaml"
     submission: "submission.csv"
