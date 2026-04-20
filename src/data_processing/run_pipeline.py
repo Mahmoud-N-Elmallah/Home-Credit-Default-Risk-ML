@@ -5,17 +5,16 @@ from pathlib import Path
 def load_data(raw_paths):
     """Step 0 - Load & Organize"""
     print("Loading data lazily...")
-    # Base tables fit in memory easily (~300k rows). Eager load for base preprocessing.
-    train_base = pl.read_csv(raw_paths['application_train'])
-    test_base = pl.read_csv(raw_paths['application_test'])
+    # Increase schema inference length to handle large datasets with initial nulls
+    train_base = pl.read_csv(raw_paths['application_train'], infer_schema_length=10000)
+    test_base = pl.read_csv(raw_paths['application_test'], infer_schema_length=10000)
     
-    # Aux tables are massive. Lazy load.
-    bureau = pl.scan_csv(raw_paths['bureau'])
-    bureau_balance = pl.scan_csv(raw_paths['bureau_balance'])
-    prev_app = pl.scan_csv(raw_paths['previous_application'])
-    pos_cash = pl.scan_csv(raw_paths['pos_cash_balance'])
-    installments = pl.scan_csv(raw_paths['installments_payments'])
-    cc_balance = pl.scan_csv(raw_paths['credit_card_balance'])
+    bureau = pl.scan_csv(raw_paths['bureau'], infer_schema_length=10000)
+    bureau_balance = pl.scan_csv(raw_paths['bureau_balance'], infer_schema_length=10000)
+    prev_app = pl.scan_csv(raw_paths['previous_application'], infer_schema_length=10000)
+    pos_cash = pl.scan_csv(raw_paths['pos_cash_balance'], infer_schema_length=10000)
+    installments = pl.scan_csv(raw_paths['installments_payments'], infer_schema_length=10000)
+    cc_balance = pl.scan_csv(raw_paths['credit_card_balance'], infer_schema_length=10000)
     
     return train_base, test_base, bureau, bureau_balance, prev_app, pos_cash, installments, cc_balance
 
@@ -88,6 +87,14 @@ def agg_bureau(bureau: pl.LazyFrame, bureau_balance: pl.LazyFrame, config):
     id_curr = config['training']['id_col']
     fe_config = config['pipeline']['feature_engineering']
     
+    # Cast known numeric for safety
+    bureau = bureau.with_columns([
+        pl.col('DAYS_CREDIT').cast(pl.Float64),
+        pl.col('AMT_CREDIT_SUM').cast(pl.Float64),
+        pl.col('AMT_CREDIT_SUM_DEBT').cast(pl.Float64)
+    ])
+    bureau_balance = bureau_balance.with_columns(pl.col('MONTHS_BALANCE').cast(pl.Float64))
+
     # Stage A: BB Agg
     status_exprs = get_proportions(bureau_balance, 'STATUS', 'STATUS')
     bb_agg = bureau_balance.group_by('SK_ID_BUREAU').agg(
@@ -136,6 +143,14 @@ def agg_prev_app(prev_app: pl.LazyFrame, config):
     fe_config = config['pipeline']['feature_engineering']
     anomaly_val = config['pipeline']['anomaly_fix']['days_employed']
     
+    # Cast
+    prev_app = prev_app.with_columns([
+        pl.col('AMT_APPLICATION').cast(pl.Float64),
+        pl.col('AMT_CREDIT').cast(pl.Float64),
+        pl.col('AMT_ANNUITY').cast(pl.Float64),
+        pl.col('DAYS_DECISION').cast(pl.Float64)
+    ])
+
     days_cols = ['DAYS_FIRST_DRAWING', 'DAYS_FIRST_DUE', 'DAYS_LAST_DUE_1ST_VERSION', 'DAYS_LAST_DUE', 'DAYS_TERMINATION']
     for col in days_cols:
         prev_app = prev_app.with_columns(
@@ -177,6 +192,11 @@ def agg_pos_cash(pos_cash: pl.LazyFrame, config):
     id_curr = config['training']['id_col']
     fe_config = config['pipeline']['feature_engineering']
     
+    pos_cash = pos_cash.with_columns([
+        pl.col('MONTHS_BALANCE').cast(pl.Float64),
+        pl.col('SK_DPD').cast(pl.Float64)
+    ])
+
     agg = pos_cash.group_by(id_curr).agg([
         pl.col('SK_ID_PREV').n_unique().alias('SK_ID_PREV_nunique'),
         pl.col('SK_DPD').max().alias('SK_DPD_max'),
@@ -199,6 +219,15 @@ def agg_installments(installments: pl.LazyFrame, config):
     print("Aggregating installments...")
     id_curr = config['training']['id_col']
     eps = config['globals']['division_epsilon']
+    
+    # Cast
+    installments = installments.with_columns([
+        pl.col('AMT_PAYMENT').cast(pl.Float64),
+        pl.col('AMT_INSTALMENT').cast(pl.Float64),
+        pl.col('DAYS_ENTRY_PAYMENT').cast(pl.Float64),
+        pl.col('DAYS_INSTALMENT').cast(pl.Float64)
+    ])
+
     installments = installments.with_columns([
         (pl.col('AMT_PAYMENT') / (pl.col('AMT_INSTALMENT') + eps)).alias('PAYMENT_PERC'),
         (pl.col('AMT_INSTALMENT') - pl.col('AMT_PAYMENT')).alias('PAYMENT_DIFF'),
@@ -224,6 +253,15 @@ def agg_cc_balance(cc_balance: pl.LazyFrame, config):
     eps = config['globals']['division_epsilon']
     fe_config = config['pipeline']['feature_engineering']
     
+    # Cast
+    cc_balance = cc_balance.with_columns([
+        pl.col('AMT_BALANCE').cast(pl.Float64),
+        pl.col('AMT_CREDIT_LIMIT_ACTUAL').cast(pl.Float64),
+        pl.col('AMT_DRAWINGS_CURRENT').cast(pl.Float64),
+        pl.col('MONTHS_BALANCE').cast(pl.Float64),
+        pl.col('SK_DPD').cast(pl.Float64)
+    ])
+
     cc_balance = cc_balance.with_columns(
         (pl.col('AMT_BALANCE') / (pl.col('AMT_CREDIT_LIMIT_ACTUAL') + eps)).clip(0, 1).alias('UTILIZATION')
     )
