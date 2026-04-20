@@ -43,10 +43,10 @@ def load_data(raw_paths):
     def scan_safe(path):
         return pl.scan_csv(
             path, 
-            infer_schema_length=0, # Turn off inference
+            infer_schema_length=10000, 
             schema_overrides=schema_overrides,
             null_values=["", "NA", "NaN", "nan", "NULL"],
-            ignore_errors=True # Skip lines with corrupted types
+            ignore_errors=True
         )
 
     train_base = pl.read_csv(raw_paths['application_train'], infer_schema_length=10000, null_values=["", "NA", "NaN", "nan", "NULL"])
