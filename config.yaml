@@ -1,5 +1,10 @@
 # Project Configuration
 
+globals:
+  random_state: 42
+  division_epsilon: 1e-8
+  n_jobs: -1
+
 data:
   raw:
     application_train: "Data/Raw/application_train.csv"
@@ -15,57 +20,110 @@ data:
     train: "Data/final/final_train.csv"
     test: "Data/final/final_test.csv"
 
+pipeline:
+  high_null_threshold: 0.6
+  correlation_threshold: 0.95
+  variance_threshold: 0.995
+  anomaly_fix:
+    days_employed: 365243
+  aux_table_prefixes:
+    - "bureau_"
+    - "prev_"
+    - "pos_"
+    - "inst_"
+    - "cc_"
+
+  feature_engineering:
+    recency_months: [ 6, 12 ] # For time-based aggregations (MONTHS_BALANCE)
+    recency_days_prev: [ 365, 730 ] # For previous_application recency (DAYS_DECISION)
+    frequency_encoding_cols:
+      - "ORGANIZATION_TYPE"
+      - "OCCUPATION_TYPE"
+    ext_sources: [ "EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3" ]
+    enquiry_cols:
+      - "AMT_REQ_CREDIT_BUREAU_HOUR"
+      - "AMT_REQ_CREDIT_BUREAU_DAY"
+      - "AMT_REQ_CREDIT_BUREAU_WEEK"
+      - "AMT_REQ_CREDIT_BUREAU_MON"
+      - "AMT_REQ_CREDIT_BUREAU_QRT"
+      - "AMT_REQ_CREDIT_BUREAU_YEAR"
+    categories:
+      bureau_active: "Active"
+      prev_app_approved: "Approved"
+      prev_app_refused: "Refused"
+      prev_app_canceled: "Canceled"
 training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
   optimization_metric: "roc_auc"
   cv_splits: 5
+  cv_shuffle: true
+  classification_threshold: 0.2
+  imbalance_ratio: 11.3
+  optuna_n_trials: 20
+  optuna_direction: "maximize"
+  optuna_subsample_rate: 0.3 # Use 30% of data for hyperparameter search speed
+
+  verbosity:
+    catboost_trial: 0
+    catboost_final: 50
+    lgbm: -1
+    optuna: "INFO"
+    search: 3
+
+  artifact_paths:
+    models_dir: "Models"
+    submission: "Data/final/submission.csv"
 
   preprocessing:
-    scaler: "robust" # Options: 'standard', 'robust', 'minmax', 'none'
-    imbalance_strategy: "borderline_smote" # Options: 'class_weight', 'smote', 'borderline_smote', 'adasyn', 'none'
+    scaler: "robust"
+    imbalance_strategy: "class_weight"
     feature_selection:
-      method: "lgbm" # Options: 'lgbm', 'none' - Use LightGBM to select top features
-      max_features: 150 # How many top features to keep. Reduces noise and speeds up training.
+      method: "lgbm"
+      max_features: 150
+      selector_params:
+        n_estimators: 200
+        verbose: -1
 
   models:
-    type: "single" # Options: 'single', 'ensemble'
+    type: "single"
 
     estimators:
       - name: "catboost"
-        weight: 1.0 # Ignored in 'single' mode
+        weight: 1
         params:
-          iterations: 100
+          iterations: 1000
           learning_rate: 0.05
           depth: 6
           task_type: "GPU"
-        param_grid:
-          model__iterations: [ 100, 200 ]
-          model__learning_rate: [ 0.05 ]
+        search_space:
+          model__iterations: { type: "int", low: 500, high: 2000 }
+          model__learning_rate: { type: "float", low: 0.01, high: 0.1, log: true }
+          model__depth: { type: "int", low: 4, high: 10 }
+          model__l2_leaf_reg: { type: "float", low: 1, high: 10 }
 
       - name: "lightgbm"
-        weight: 0.5 
-        # Fixed parameters for ensemble mode
+        weight: 1
         params:
-          n_estimators: 100
+          n_estimators: 1000
           learning_rate: 0.05
           max_depth: 6
           device_type: "gpu"
-        # Grid for single mode. MUST prefix with 'model__' for imblearn pipeline.
-        param_grid:
-          model__num_leaves: [ 31, 63 ]
-          model__max_depth: [ 6, -1 ]
-          model__learning_rate: [ 0.05 ]
-          model__n_estimators: [ 500, 1000 ]
+        search_space:
+          model__num_leaves: { type: "int", low: 20, high: 128 }
+          model__max_depth: { type: "int", low: 4, high: 12 }
+          model__learning_rate: { type: "float", low: 0.01, high: 0.1, log: true }
+          model__n_estimators: { type: "int", low: 500, high: 2000 }
 
       - name: "xgboost"
-        weight: 0.5
+        weight: 1
         params:
-          n_estimators: 100
+          n_estimators: 1000
           learning_rate: 0.05
           max_depth: 6
           tree_method: "hist"
           device: "cuda"
-        param_grid:
-          model__n_estimators: [ 100, 200 ]
-          model__learning_rate: [ 0.05 ]
+        search_space:
+          model__n_estimators: { type: "int", low: 500, high: 2000 }
+          model__learning_rate: { type: "float", low: 0.01, high: 0.1, log: true }
+          model__max_depth: { type: "int", low: 4, high: 10 }

@@ -13,16 +13,17 @@ def main():
     parser.add_argument('--process', action='store_true', help="Run the data processing pipeline")
     parser.add_argument('--train', action='store_true', help="Run the model training pipeline")
     parser.add_argument('--all', action='store_true', help="Run both processing and training")
+    parser.add_argument('--config', type=str, default="config.yaml", help="Path to the configuration file (default: config.yaml)")
     args = parser.parse_args()
 
     if not any([args.process, args.train, args.all]):
         print("Please specify a step: --process, --train, or --all")
         return
 
-    print("Loading config...")
-    config_path = Path("config.yaml")
+    print(f"Loading config from {args.config}...")
+    config_path = Path(args.config)
     if not config_path.exists():
-        print("Config file not found.")
+        print(f"Config file {args.config} not found.")
         return
         
     with open(config_path, "r") as f:
