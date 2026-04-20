@@ -1,298 +1,768 @@
-import yaml
-import numpy as np
-import pandas as pd
+from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
-import joblib
+import json
 import re
+
+import joblib
 import matplotlib.pyplot as plt
-import seaborn as sns
-from tqdm import tqdm
-import warnings
+import numpy as np
 import optuna
-
-# Models
-from lightgbm import LGBMClassifier
-from xgboost import XGBClassifier
+import pandas as pd
+import seaborn as sns
+import yaml
 from catboost import CatBoostClassifier
-
-# Sklearn & Imblearn
-import sklearn
-sklearn.set_config(transform_output="pandas")
-from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
-from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
-from sklearn.metrics import roc_auc_score, average_precision_score, f1_score, classification_report, confusion_matrix
-from sklearn.feature_selection import SelectFromModel
-from imblearn.over_sampling import SMOTE, BorderlineSMOTE, ADASYN
+from imblearn.over_sampling import ADASYN, SMOTE, BorderlineSMOTE
 from imblearn.under_sampling import RandomUnderSampler
+from lightgbm import LGBMClassifier, early_stopping
+from sklearn.feature_selection import SelectFromModel
+from sklearn.metrics import (
+    average_precision_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    roc_auc_score,
+)
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from tqdm import tqdm
+from xgboost import XGBClassifier
+
+
+SCALERS = {
+    "standard": StandardScaler,
+    "robust": RobustScaler,
+    "minmax": MinMaxScaler,
+}
+
+SAMPLERS = {
+    "smote": SMOTE,
+    "borderline_smote": BorderlineSMOTE,
+    "adasyn": ADASYN,
+    "random_undersample": RandomUnderSampler,
+}
+
+MODELS = {
+    "catboost": CatBoostClassifier,
+    "lightgbm": LGBMClassifier,
+    "xgboost": XGBClassifier,
+}
+
+ACCELERATOR_CACHE = {}
+
+
+def resolve_training_config(config):
+    resolved = deepcopy(config)
+    training_config = resolved["training"]
+    profile_name = training_config["run_mode"]
+    profiles = training_config.get("run_profiles", {})
+    if profile_name not in profiles:
+        raise ValueError(f"Unknown training.run_mode: {profile_name}")
+
+    profile = profiles[profile_name]
+    for key in ["cv_splits", "optuna_n_trials", "optuna_subsample_rate"]:
+        training_config[key] = profile[key]
+
+    feature_selection = training_config["preprocessing"]["feature_selection"]
+    feature_selection["enabled_during_search"] = profile["feature_selection_enabled_during_search"]
+    training_config["run_full_oof_validation"] = profile["run_full_oof_validation"]
+    return resolved
+
+
+def stable_yaml_hash(data):
+    dumped = yaml.safe_dump(data, sort_keys=True)
+    return sha256(dumped.encode("utf-8")).hexdigest()
+
+
+def file_hash(path):
+    digest = sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def metadata_path(models_dir, config):
+    metadata_name = config["training"]["artifact_reuse"]["metadata"]
+    path = Path(metadata_name)
+    return path if path.is_absolute() else models_dir / path
+
+
+def build_run_metadata(config, X, y, train_path):
+    return {
+        "config_hash": stable_yaml_hash(config),
+        "data_hashes": {str(train_path): file_hash(train_path)},
+        "run_mode": config["training"]["run_mode"],
+        "phases": config["training"]["phases"],
+        "cv_splits": config["training"]["cv_splits"],
+        "optuna_n_trials": config["training"]["optuna_n_trials"],
+        "optuna_subsample_rate": config["training"]["optuna_subsample_rate"],
+        "row_count": int(len(X)),
+        "feature_count": int(X.shape[1]),
+        "positive_count": int(y.sum()),
+        "metric_scope": "out_of_fold",
+        "selected_accelerators": {},
+    }
+
+
+def write_run_metadata(models_dir, config, metadata):
+    path = metadata_path(models_dir, config)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as file:
+        yaml.safe_dump(metadata, file, sort_keys=False)
+
+
+def validate_reusable_artifacts(models_dir, config, metadata):
+    if config["training"]["artifact_reuse"]["allow_stale_artifacts"]:
+        return
+    path = metadata_path(models_dir, config)
+    if not path.exists():
+        return
+    existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if existing.get("config_hash") != metadata["config_hash"]:
+        raise ValueError("Existing training artifacts use different config. Set allow_stale_artifacts=true to reuse.")
+    if existing.get("data_hashes") != metadata["data_hashes"]:
+        raise ValueError("Existing training artifacts use different data. Set allow_stale_artifacts=true to reuse.")
+
 
 def clean_column_names(df):
-    """LightGBM doesn't support JSON characters in column names."""
-    df.columns = [re.sub(r'[^\w]', '_', c) for c in df.columns]
+    cleaned = [re.sub(r"[^\w]", "_", col) for col in df.columns]
+    duplicates = sorted({col for col in cleaned if cleaned.count(col) > 1})
+    if duplicates:
+        raise ValueError(f"Column-name cleanup produced duplicates: {duplicates[:10]}")
+    df = df.copy()
+    df.columns = cleaned
     return df
 
+
 def get_scaler(scaler_name):
-    if scaler_name == 'standard': return StandardScaler()
-    elif scaler_name == 'robust': return RobustScaler()
-    elif scaler_name == 'minmax': return MinMaxScaler()
-    return None
+    if scaler_name in [None, "none"]:
+        return None
+    try:
+        return SCALERS[scaler_name]()
+    except KeyError as exc:
+        raise ValueError(f"Unknown scaler in config: {scaler_name}") from exc
 
-def get_imbalance_sampler(strategy, config):
-    seed = config['globals']['random_state']
-    if strategy == 'smote': return SMOTE(random_state=seed)
-    elif strategy == 'borderline_smote': return BorderlineSMOTE(random_state=seed)
-    elif strategy == 'adasyn': return ADASYN(random_state=seed)
-    elif strategy == 'random_undersample': return RandomUnderSampler(random_state=seed)
-    return None
 
-def get_model(name, params, class_weight_strategy, config, is_trial=True):
-    params = params.copy() if params else {}
-    seed = config['globals']['random_state']
-    ratio = config['training'].get('imbalance_ratio', 1)
-    
-    if class_weight_strategy == 'class_weight':
-        if name == 'lightgbm': params['is_unbalance'] = True
-        elif name == 'xgboost': params['scale_pos_weight'] = ratio
-        elif name == 'catboost': params['auto_class_weights'] = 'Balanced'
+def parse_selector_threshold(value):
+    if isinstance(value, str) and value.lower() == "-inf":
+        return -np.inf
+    return value
 
-    if name == 'lightgbm':
-        return LGBMClassifier(random_state=seed, **params)
-    elif name == 'xgboost':
-        return XGBClassifier(random_state=seed, **params)
-    elif name == 'catboost':
-        v_key = 'catboost_trial' if is_trial else 'catboost_final'
-        v_val = config['training']['verbosity'].get(v_key, 0)
-        return CatBoostClassifier(random_state=seed, verbose=v_val, **params)
-    else:
-        raise ValueError(f"Unknown model: {name}")
 
-def calculate_metric(y_true, y_pred, metric_name, threshold):
-    if metric_name == 'roc_auc': return roc_auc_score(y_true, y_pred)
-    elif metric_name == 'average_precision': return average_precision_score(y_true, y_pred)
-    elif metric_name == 'f1':
-        y_pred_bin = (y_pred > threshold).astype(int)
-        return f1_score(y_true, y_pred_bin)
+def get_acceleration_config(config):
+    return config["training"].get("acceleration", {})
+
+
+def get_accelerator_order(config):
+    acceleration_config = get_acceleration_config(config)
+    preferred = acceleration_config.get("preferred", "cpu")
+    fallback = acceleration_config.get("fallback", "cpu")
+    retry = acceleration_config.get("retry_on_failure", True)
+    if retry and fallback != preferred:
+        return [preferred, fallback]
+    return [preferred]
+
+
+def get_accelerator_params(model_name, config, accelerator):
+    acceleration_config = get_acceleration_config(config)
+    model_config = acceleration_config.get("models", {}).get(model_name, {})
+    return model_config.get(f"{accelerator}_params", {}).copy()
+
+
+def accelerator_failure_is_retryable(error, config):
+    message = str(error).lower()
+    keywords = get_acceleration_config(config).get("gpu_failure_keywords", [])
+    return any(keyword.lower() in message for keyword in keywords)
+
+
+def get_imbalance_config(config):
+    return config["training"]["preprocessing"]["imbalance"]
+
+
+def get_imbalance_sampler(config):
+    imbalance_config = get_imbalance_config(config)
+    strategy = imbalance_config["strategy"]
+    if strategy in [None, "none", "class_weight"]:
+        return None
+    try:
+        sampler_cls = SAMPLERS[strategy]
+    except KeyError as exc:
+        raise ValueError(f"Unknown imbalance strategy in config: {strategy}") from exc
+    params = imbalance_config.get("sampler_params", {}).copy()
+    params.setdefault("random_state", config["globals"]["random_state"])
+    return sampler_cls(**params)
+
+
+def split_speed_params(params, model_name=None):
+    model_params = params.copy() if params else {}
+    fit_options = {
+        "eval_fraction": model_params.pop("eval_fraction", None),
+        "early_stopping_rounds": model_params.get("early_stopping_rounds"),
+    }
+    if model_name != "xgboost":
+        model_params.pop("early_stopping_rounds", None)
+    return model_params, fit_options
+
+
+def merge_model_params(name, params, config, is_trial=True, accelerator=None):
+    base_params, _ = split_speed_params(params, name)
+    model_params = base_params.copy()
+    if accelerator is not None:
+        model_params.update(get_accelerator_params(name, config, accelerator))
+    model_params.setdefault("random_state", config["globals"]["random_state"])
+
+    imbalance_config = get_imbalance_config(config)
+    if imbalance_config["strategy"] == "class_weight":
+        model_params.update(imbalance_config.get("class_weight_params", {}).get(name, {}))
+
+    if name == "catboost":
+        verbosity = config["training"]["verbosity"]
+        verbosity_key = "catboost_trial" if is_trial else "catboost_final"
+        model_params.setdefault("verbose", verbosity.get(verbosity_key, 0))
+
+    return model_params
+
+
+def fit_kwargs_for_model(name, fit_options, X, y, config):
+    eval_fraction = fit_options.get("eval_fraction")
+    early_stopping_rounds = fit_options.get("early_stopping_rounds")
+    if not eval_fraction or not early_stopping_rounds or len(X) < 100:
+        return X, y, {}
+
+    X_fit, X_eval, y_fit, y_eval = train_test_split(
+        X,
+        y,
+        test_size=eval_fraction,
+        stratify=y,
+        random_state=config["globals"]["random_state"],
+    )
+    if name == "catboost":
+        return X_fit, y_fit, {"eval_set": (X_eval, y_eval), "early_stopping_rounds": early_stopping_rounds}
+    if name == "lightgbm":
+        return X_fit, y_fit, {
+            "eval_set": [(X_eval, y_eval)],
+            "callbacks": [early_stopping(early_stopping_rounds, verbose=False)],
+        }
+    if name == "xgboost":
+        return X_fit, y_fit, {"eval_set": [(X_eval, y_eval)], "verbose": False}
+    return X, y, {}
+
+
+def capability_sample(X, y, config):
+    if len(X) <= 512:
+        return X, y
+    sample_size = min(len(X), 512)
+    _, X_sample, _, y_sample = train_test_split(
+        X,
+        y,
+        test_size=sample_size,
+        stratify=y,
+        random_state=config["globals"]["random_state"],
+    )
+    return X_sample, y_sample
+
+
+def resolve_model_accelerator(name, params, config, X, y, is_trial):
+    cache_key = (name, config["training"]["run_mode"])
+    if cache_key in ACCELERATOR_CACHE:
+        return ACCELERATOR_CACHE[cache_key]
+
+    X_sample, y_sample = capability_sample(X, y, config)
+    params_no_speed, _ = split_speed_params(params, name)
+    test_params = params_no_speed.copy()
+    if name == "catboost":
+        test_params["iterations"] = min(int(test_params.get("iterations", 10)), 2)
+    elif name in ["lightgbm", "xgboost"]:
+        test_params["n_estimators"] = min(int(test_params.get("n_estimators", 10)), 2)
+
+    accelerators = get_accelerator_order(config)
+    last_error = None
+    for accelerator in accelerators:
+        model_params = merge_model_params(name, test_params, config, is_trial=is_trial, accelerator=accelerator)
+        try:
+            MODELS[name](**model_params).fit(X_sample, y_sample)
+            ACCELERATOR_CACHE[cache_key] = accelerator
+            return accelerator
+        except Exception as error:
+            last_error = error
+            if accelerator != accelerators[-1] and accelerator_failure_is_retryable(error, config):
+                continue
+            raise
+    raise last_error
+
+
+def fit_model(name, params, config, X, y, is_trial):
+    accelerator = resolve_model_accelerator(name, params, config, X, y, is_trial)
+    model_params = merge_model_params(name, params, config, is_trial=is_trial, accelerator=accelerator)
+    _, fit_options = split_speed_params(params, name)
+    X_fit, y_fit, fit_kwargs = fit_kwargs_for_model(name, fit_options, X, y, config)
+    model = MODELS[name](**model_params)
+    try:
+        model.fit(X_fit, y_fit, **fit_kwargs)
+    except Exception as error:
+        if accelerator_failure_is_retryable(error, config) and accelerator != get_accelerator_order(config)[-1]:
+            raise RuntimeError(f"{name} failed after cached accelerator selection. Error was: {error}") from error
+        raise
+    return model, accelerator
+
+
+class TrainingPreprocessor:
+    def __init__(self, config, feature_selection_enabled=True):
+        self.config = config
+        self.feature_selection_enabled = feature_selection_enabled
+        self.scaler = None
+        self.selector = None
+        self.selected_columns = None
+
+    def fit(self, X, y):
+        t_config = self.config["training"]
+        seed = self.config["globals"]["random_state"]
+        X_work = X.copy()
+
+        scaler_name = t_config["preprocessing"]["scaler"]
+        self.scaler = get_scaler(scaler_name)
+        if self.scaler is not None:
+            X_work = pd.DataFrame(self.scaler.fit_transform(X_work), columns=X_work.columns, index=X_work.index)
+
+        fs_config = t_config["preprocessing"]["feature_selection"]
+        if self.feature_selection_enabled and fs_config["method"] == "lgbm":
+            selector_params = fs_config.get("selector_params", {}).copy()
+            self.selector = fit_lgbm_selector(X_work, y, selector_params, fs_config, self.config, seed)
+            self.selected_columns = X_work.columns[self.selector.get_support()].to_list()
+        elif fs_config["method"] not in [None, "none", "lgbm"]:
+            raise ValueError(f"Unknown feature_selection.method: {fs_config['method']}")
+
+        return self
+
+    def transform(self, X):
+        X_work = X.copy()
+        if self.scaler is not None:
+            X_work = pd.DataFrame(self.scaler.transform(X_work), columns=X_work.columns, index=X_work.index)
+        if self.selected_columns is not None:
+            missing_cols = [col for col in self.selected_columns if col not in X_work.columns]
+            if missing_cols:
+                raise ValueError(f"Missing selected columns during transform: {missing_cols[:10]}")
+            X_work = X_work[self.selected_columns]
+        return X_work
+
+    def fit_transform(self, X, y):
+        self.fit(X, y)
+        return self.transform(X)
+
+
+def fit_lgbm_selector(X, y, selector_params, fs_config, config, seed):
+    accelerator = resolve_model_accelerator("lightgbm", selector_params, config, X, y, is_trial=True)
+    model_params = selector_params.copy()
+    model_params.update(get_accelerator_params("lightgbm", config, accelerator))
+    model_params.setdefault("random_state", seed)
+    selector = SelectFromModel(
+        LGBMClassifier(**model_params),
+        max_features=fs_config["max_features"],
+        threshold=parse_selector_threshold(fs_config["threshold"]),
+    )
+    selector.fit(X, y)
+    return selector
+
+
+def calculate_metric(y_true, y_pred_prob, metric_name, threshold):
+    if metric_name == "roc_auc":
+        return roc_auc_score(y_true, y_pred_prob)
+    if metric_name == "average_precision":
+        return average_precision_score(y_true, y_pred_prob)
+    if metric_name == "f1":
+        return f1_score(y_true, (y_pred_prob > threshold).astype(int))
     raise ValueError(f"Unknown metric: {metric_name}")
 
-def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, threshold):
+
+def model_artifact_path(models_dir, config, key, **kwargs):
+    pattern = config["training"]["artifact_paths"][key]
+    path = Path(pattern.format(**kwargs))
+    return path if path.is_absolute() else models_dir / path
+
+
+def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, evaluation_scope):
+    allowed_scopes = {"out_of_fold", "search_subsample_cv", "final_train_fit"}
+    if evaluation_scope not in allowed_scopes:
+        raise ValueError(f"Invalid evaluation scope: {evaluation_scope}")
+
+    t_config = config["training"]
+    eval_config = t_config["evaluation"]
+    threshold = t_config["classification_threshold"]
     y_pred_bin = (y_pred_prob > threshold).astype(int)
+
     report_str = f"Model: {model_name}\n"
-    report_str += "="*40 + "\n"
+    report_str += "=" * 40 + "\n"
+    report_str += f"Evaluation Scope: {evaluation_scope}\n"
+    report_str += f"Run Mode: {t_config['run_mode']}\n"
     report_str += f"Classification Threshold: {threshold}\n"
     report_str += f"ROC AUC Score: {roc_auc_score(y_true, y_pred_prob):.4f}\n"
     report_str += f"Average Precision (PR AUC): {average_precision_score(y_true, y_pred_prob):.4f}\n"
     report_str += f"F1 Score: {f1_score(y_true, y_pred_bin):.4f}\n\n"
     report_str += "Classification Report:\n"
-    report_str += classification_report(y_true, y_pred_bin)
+    report_str += classification_report(y_true, y_pred_bin, digits=eval_config["report_digits"], zero_division=0)
 
     models_dir.mkdir(parents=True, exist_ok=True)
-    with open(models_dir / f"{model_name}_evaluation_report.txt", "w") as f:
-        f.write(report_str)
+    model_artifact_path(models_dir, config, "evaluation_report", model_name=model_name).write_text(
+        report_str,
+        encoding="utf-8",
+    )
 
     cm = confusion_matrix(y_true, y_pred_bin)
-    plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-    plt.title(f'Confusion Matrix: {model_name} (Thresh: {threshold})')
-    plt.ylabel('Actual')
-    plt.xlabel('Predicted')
+    plt.figure(figsize=tuple(eval_config["confusion_matrix_figsize"]))
+    sns.heatmap(cm, annot=True, fmt="d", cmap=eval_config["confusion_matrix_cmap"])
+    plt.title(f"Confusion Matrix: {model_name} ({evaluation_scope})")
+    plt.ylabel("Actual")
+    plt.xlabel("Predicted")
     plt.tight_layout()
-    plt.savefig(models_dir / f"{model_name}_confusion_matrix.png")
+    plt.savefig(model_artifact_path(models_dir, config, "confusion_matrix", model_name=model_name))
     plt.close()
+
 
 def suggest_params(trial, search_space):
     params = {}
     for param_name, space in search_space.items():
-        if space['type'] == 'int':
-            params[param_name] = trial.suggest_int(param_name, space['low'], space['high'], log=space.get('log', False))
-        elif space['type'] == 'float':
-            params[param_name] = trial.suggest_float(param_name, space['low'], space['high'], log=space.get('log', False))
-        elif space['type'] == 'categorical':
-            params[param_name] = trial.suggest_categorical(param_name, space['choices'])
+        if space["type"] == "int":
+            params[param_name] = trial.suggest_int(param_name, space["low"], space["high"], log=space.get("log", False))
+        elif space["type"] == "float":
+            params[param_name] = trial.suggest_float(param_name, space["low"], space["high"], log=space.get("log", False))
+        elif space["type"] == "categorical":
+            params[param_name] = trial.suggest_categorical(param_name, space["choices"])
+        else:
+            raise ValueError(f"Unknown search space type for {param_name}: {space['type']}")
     return params
 
+
+def merged_estimator_config(est_config, param_overrides=None):
+    candidate = deepcopy(est_config)
+    params = est_config.get("params", {}).copy()
+    if param_overrides:
+        params.update(param_overrides)
+    candidate["params"] = params
+    return candidate
+
+
+def get_cv(config):
+    t_config = config["training"]
+    return StratifiedKFold(
+        n_splits=t_config["cv_splits"],
+        shuffle=t_config["cv_shuffle"],
+        random_state=config["globals"]["random_state"],
+    )
+
+
+def fit_predict_fold(X_train, y_train, X_valid, estimator_config, config, is_trial, feature_selection_enabled):
+    preprocessor = TrainingPreprocessor(config, feature_selection_enabled=feature_selection_enabled)
+    X_train_processed = preprocessor.fit_transform(X_train, y_train)
+    X_valid_processed = preprocessor.transform(X_valid)
+
+    sampler = get_imbalance_sampler(config)
+    if sampler is not None:
+        X_train_processed, y_train = sampler.fit_resample(X_train_processed, y_train)
+
+    model, _ = fit_model(
+        estimator_config["name"],
+        estimator_config.get("params", {}),
+        config,
+        X_train_processed,
+        y_train,
+        is_trial,
+    )
+    return model.predict_proba(X_valid_processed)[:, 1]
+
+
+def cross_validated_single_predictions(X, y, estimator_config, config, desc, is_trial, feature_selection_enabled):
+    cv = get_cv(config)
+    oof_preds = np.full(len(X), np.nan)
+
+    for train_idx, valid_idx in tqdm(cv.split(X, y), total=config["training"]["cv_splits"], desc=desc):
+        oof_preds[valid_idx] = fit_predict_fold(
+            X.iloc[train_idx],
+            y.iloc[train_idx],
+            X.iloc[valid_idx],
+            estimator_config,
+            config,
+            is_trial=is_trial,
+            feature_selection_enabled=feature_selection_enabled,
+        )
+
+    if np.isnan(oof_preds).any():
+        raise ValueError("OOF predictions incomplete; at least one row was not predicted.")
+    return oof_preds
+
+
+def cross_validated_ensemble_predictions(X, y, estimators, config):
+    cv = get_cv(config)
+    oof_preds = np.full(len(X), np.nan)
+    total_weight = sum(estimator["weight"] for estimator in estimators)
+
+    for train_idx, valid_idx in tqdm(cv.split(X, y), total=config["training"]["cv_splits"], desc="Ensemble Folds"):
+        X_train, y_train = X.iloc[train_idx], y.iloc[train_idx]
+        X_valid = X.iloc[valid_idx]
+        preprocessor = TrainingPreprocessor(config, feature_selection_enabled=True)
+        X_train_processed = preprocessor.fit_transform(X_train, y_train)
+        X_valid_processed = preprocessor.transform(X_valid)
+
+        sampler = get_imbalance_sampler(config)
+        if sampler is not None:
+            X_train_processed, y_train = sampler.fit_resample(X_train_processed, y_train)
+
+        fold_preds = np.zeros(len(X_valid))
+        for estimator_config in estimators:
+            model, _ = fit_model(
+                estimator_config["name"],
+                estimator_config.get("params", {}),
+                config,
+                X_train_processed,
+                y_train,
+                False,
+            )
+            fold_preds += model.predict_proba(X_valid_processed)[:, 1] * (estimator_config["weight"] / total_weight)
+        oof_preds[valid_idx] = fold_preds
+
+    if np.isnan(oof_preds).any():
+        raise ValueError("OOF predictions incomplete; at least one row was not predicted.")
+    return oof_preds
+
+
+def fit_final_single_model(X, y, estimator_config, config, models_dir, model_name):
+    preprocessor = TrainingPreprocessor(config, feature_selection_enabled=True)
+    X_processed = preprocessor.fit_transform(X, y)
+
+    sampler = get_imbalance_sampler(config)
+    y_fit = y
+    if sampler is not None:
+        X_processed, y_fit = sampler.fit_resample(X_processed, y_fit)
+
+    model, accelerator = fit_model(
+        estimator_config["name"],
+        estimator_config.get("params", {}),
+        config,
+        X_processed,
+        y_fit,
+        False,
+    )
+    joblib.dump(preprocessor, model_artifact_path(models_dir, config, "preprocessor"))
+    joblib.dump(model, model_artifact_path(models_dir, config, "single_model", model_name=model_name))
+    return model, preprocessor, accelerator
+
+
+def fit_final_ensemble(X, y, estimators, config, models_dir):
+    preprocessor = TrainingPreprocessor(config, feature_selection_enabled=True)
+    X_processed = preprocessor.fit_transform(X, y)
+
+    sampler = get_imbalance_sampler(config)
+    y_fit = y
+    if sampler is not None:
+        X_processed, y_fit = sampler.fit_resample(X_processed, y_fit)
+
+    joblib.dump(preprocessor, model_artifact_path(models_dir, config, "preprocessor"))
+
+    final_models = []
+    accelerators = {}
+    for estimator_config in estimators:
+        model, accelerator = fit_model(
+            estimator_config["name"],
+            estimator_config.get("params", {}),
+            config,
+            X_processed,
+            y_fit,
+            False,
+        )
+        joblib.dump(
+            model,
+            model_artifact_path(models_dir, config, "ensemble_model", model_name=estimator_config["name"]),
+        )
+        final_models.append((model, estimator_config["weight"]))
+        accelerators[estimator_config["name"]] = accelerator
+
+    return final_models, preprocessor, accelerators
+
+
+def configure_optuna_logging(config):
+    level_name = str(config["training"]["verbosity"].get("optuna", "INFO")).upper()
+    levels = {
+        "DEBUG": optuna.logging.DEBUG,
+        "INFO": optuna.logging.INFO,
+        "WARNING": optuna.logging.WARNING,
+        "ERROR": optuna.logging.ERROR,
+        "CRITICAL": optuna.logging.CRITICAL,
+    }
+    optuna.logging.set_verbosity(levels.get(level_name, optuna.logging.INFO))
+
+
 def run_training(config):
-    print("Initializing Optimized Training Pipeline...")
-    t_config = config['training']
-    seed = config['globals']['random_state']
-    models_dir = Path(t_config['artifact_paths']['models_dir'])
-    
-    # 1. Load Data
-    train_path = Path(config['data']['final']['train'])
-    if not train_path.exists(): raise FileNotFoundError(f"Training data not found at {train_path}.")
+    config = resolve_training_config(config)
+    print(f"Initializing training pipeline ({config['training']['run_mode']})...")
+    t_config = config["training"]
+    seed = config["globals"]["random_state"]
+    models_dir = Path(t_config["artifact_paths"]["models_dir"])
+    models_dir.mkdir(parents=True, exist_ok=True)
+    configure_optuna_logging(config)
+
+    train_path = Path(config["data"]["final"]["train"])
+    test_path = Path(config["data"]["final"]["test"])
+    if not train_path.exists():
+        raise FileNotFoundError(f"Training data not found at {train_path}. Run --process first.")
+    if not test_path.exists():
+        raise FileNotFoundError(f"Test data not found at {test_path}. Run --process first.")
+
     df = pd.read_csv(train_path)
-    y = df[t_config['target_col']]
-    X = df.drop(columns=[t_config['target_col'], t_config['id_col']])
-    X = clean_column_names(X)
+    y = df[t_config["target_col"]]
+    X = clean_column_names(df.drop(columns=[t_config["target_col"], t_config["id_col"]]))
+    metadata = build_run_metadata(config, X, y, train_path)
+    validate_reusable_artifacts(models_dir, config, metadata)
 
-    # 2. Pre-Scaling
-    scaler_name = t_config['preprocessing']['scaler']
-    scaler = get_scaler(scaler_name)
-    if scaler:
-        print(f"  [STEP] Pre-Scaling data ({scaler_name.upper()})...")
-        X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns, index=X.index)
-        joblib.dump(scaler, models_dir / f"{scaler_name}_scaler.pkl")
-
-    # 3. Pre-Feature Selection
-    fs_config = t_config['preprocessing'].get('feature_selection', {'method': 'none'})
-    if fs_config['method'] == 'lgbm':
-        max_f = fs_config.get('max_features', 150)
-        fs_params = fs_config.get('selector_params', {})
-        print(f"  [STEP] Pre-Selecting top {max_f} features using LightGBM...")
-        lgb_sel = LGBMClassifier(random_state=seed, **fs_params)
-        selector = SelectFromModel(lgb_sel, max_features=max_f, threshold=-np.inf)
-        selector.fit(X, y)
-        selected_cols = X.columns[selector.get_support()]
-        X = X[selected_cols]
-        joblib.dump(selector, models_dir / "feature_selector.pkl")
+    model_type = t_config["models"]["type"]
+    if model_type == "single":
+        run_single_phases(X, y, config, models_dir, seed, metadata)
+    elif model_type == "ensemble":
+        run_ensemble_phases(X, y, config, models_dir, metadata)
     else:
-        selector = None
+        raise ValueError(f"Unknown training.models.type: {model_type}")
 
-    # 4. Handle Mode
-    if t_config['models']['type'] == 'single':
-        run_single_optuna(X, y, config, models_dir, selector)
-    elif t_config['models']['type'] == 'ensemble':
-        run_ensemble_optimized(X, y, config, models_dir, selector)
+    metadata["selected_accelerators"] = {f"{name}:{mode}": acc for (name, mode), acc in ACCELERATOR_CACHE.items()}
+    write_run_metadata(models_dir, config, metadata)
 
-def run_single_optuna(X, y, config, models_dir, selector):
-    t_config = config['training']
-    seed = config['globals']['random_state']
-    subsample_rate = t_config.get('optuna_subsample_rate', 1.0)
-    
-    est_config = t_config['models']['estimators'][0]
-    name = est_config['name']
-    search_space = est_config.get('search_space', {})
-    
-    # Stratified Subsampling for speed
-    if subsample_rate < 1.0:
-        print(f"  [STEP] Subsampling {subsample_rate*100}% of data for Optuna speed...")
-        X_search, _, y_search, _ = train_test_split(X, y, train_size=subsample_rate, stratify=y, random_state=seed)
-    else:
-        X_search, y_search = X, y
+
+def run_single_phases(X, y, config, models_dir, seed, metadata):
+    t_config = config["training"]
+    phases = t_config["phases"]
+    est_config = t_config["models"]["estimators"][0]
+    name = est_config["name"]
+    best_config = est_config
+
+    if phases["search"]:
+        best_config = run_single_search(X, y, config, models_dir, seed, est_config)
+    if phases["validate"] and t_config["run_full_oof_validation"]:
+        report_name = f"{name}_optuna"
+        print("Scoring best model with full-data OOF validation...")
+        oof_preds = cross_validated_single_predictions(
+            X,
+            y,
+            best_config,
+            config,
+            desc=f"{report_name} OOF",
+            is_trial=False,
+            feature_selection_enabled=True,
+        )
+        save_evaluation_report(y, oof_preds, report_name, models_dir, config, "out_of_fold")
+    elif phases["validate"]:
+        print("Skipping full-data OOF validation by run profile.")
+
+    if phases["final_fit"]:
+        model, preprocessor, accelerator = fit_final_single_model(X, y, best_config, config, models_dir, name)
+        metadata["selected_accelerators"][name] = accelerator
+        predict_test_and_submit(model, config, preprocessor=preprocessor, is_ensemble=False)
+
+
+def run_single_search(X, y, config, models_dir, seed, est_config):
+    t_config = config["training"]
+    name = est_config["name"]
+    search_space = est_config.get("search_space", {})
+    subsample_rate = t_config["optuna_subsample_rate"]
+
+    print(f"Search phase: {name}, {t_config['optuna_n_trials']} trials, {subsample_rate * 100:.1f}% data.")
+    X_search, _, y_search, _ = train_test_split(
+        X,
+        y,
+        train_size=subsample_rate,
+        stratify=y,
+        random_state=seed,
+    )
+    feature_selection_enabled = t_config["preprocessing"]["feature_selection"]["enabled_during_search"]
 
     def objective(trial):
         trial_params = suggest_params(trial, search_space)
-        model_params = {k.replace('model__', ''): v for k, v in trial_params.items()}
-        params = est_config.get('params', {}).copy()
-        params.update(model_params)
-        
-        model = get_model(name, params, t_config['preprocessing']['imbalance_strategy'], config, is_trial=True)
-        
-        # Handle resampler if not class_weight
-        strategy = t_config['preprocessing']['imbalance_strategy']
-        sampler = get_imbalance_sampler(strategy, config)
-        
-        cv = StratifiedKFold(n_splits=t_config['cv_splits'], shuffle=t_config['cv_shuffle'], random_state=seed)
-        
-        scores = []
-        for tr_idx, val_idx in cv.split(X_search, y_search):
-            X_tr, y_tr = X_search.iloc[tr_idx], y_search.iloc[tr_idx]
-            X_va, y_va = X_search.iloc[val_idx], y_search.iloc[val_idx]
-            
-            if sampler: X_tr, y_tr = sampler.fit_resample(X_tr, y_tr)
-            
-            model.fit(X_tr, y_tr)
-            preds = model.predict_proba(X_va)[:, 1]
-            scores.append(calculate_metric(y_va, preds, t_config['optimization_metric'], t_config['classification_threshold']))
-            
-        return np.mean(scores)
+        model_params = {key.replace("model__", ""): value for key, value in trial_params.items()}
+        candidate_config = merged_estimator_config(est_config, model_params)
+        preds = cross_validated_single_predictions(
+            X_search,
+            y_search,
+            candidate_config,
+            config,
+            desc=f"{name} Search CV",
+            is_trial=True,
+            feature_selection_enabled=feature_selection_enabled,
+        )
+        return calculate_metric(y_search, preds, t_config["optimization_metric"], t_config["classification_threshold"])
 
-    study = optuna.create_study(direction=t_config['optuna_direction'], sampler=optuna.samplers.TPESampler(seed=seed))
-    print(f"Starting Optuna search for {name}...")
-    study.optimize(objective, n_trials=t_config['optuna_n_trials'], show_progress_bar=True)
-    
-    best_params_clean = {k.replace('model__', ''): v for k, v in study.best_params.items()}
-    with open(models_dir / f"{name}_best_params.yaml", 'w') as f:
-        yaml.dump(best_params_clean, f)
-        
-    print(f"Retraining best model on 100% data...")
-    final_params = est_config.get('params', {}).copy()
-    final_params.update(best_params_clean)
-    best_model = get_model(name, final_params, t_config['preprocessing']['imbalance_strategy'], config, is_trial=False)
-    
-    X_final, y_final = X, y
-    sampler = get_imbalance_sampler(t_config['preprocessing']['imbalance_strategy'], config)
-    if sampler: X_final, y_final = sampler.fit_resample(X_final, y_final)
-    
-    best_model.fit(X_final, y_final)
-    joblib.dump(best_model, models_dir / f"{name}_optuna_best_model.pkl")
-    
-    y_pred_prob = best_model.predict_proba(X)[:, 1]
-    save_evaluation_report(y, y_pred_prob, f"{name}_optuna", models_dir, t_config['classification_threshold'])
-    
-    # Global predict call for submission
-    predict_test_and_submit(best_model, config, is_ensemble=False)
+    study = optuna.create_study(
+        direction=t_config["optuna_direction"],
+        sampler=optuna.samplers.TPESampler(seed=seed),
+    )
+    study.optimize(objective, n_trials=t_config["optuna_n_trials"], show_progress_bar=True)
+    best_params = {key.replace("model__", ""): value for key, value in study.best_params.items()}
+    with open(model_artifact_path(models_dir, config, "best_params", model_name=name), "w", encoding="utf-8") as file:
+        yaml.safe_dump(best_params, file)
 
-def run_ensemble_optimized(X, y, config, models_dir, selector):
-    t_config = config['training']
-    seed = config['globals']['random_state']
-    threshold = t_config['classification_threshold']
-    
-    cv = StratifiedKFold(n_splits=t_config['cv_splits'], shuffle=t_config['cv_shuffle'], random_state=seed)
-    estimators = t_config['models']['estimators']
-    oof_preds = np.zeros(len(X))
-    
-    sampler = get_imbalance_sampler(t_config['preprocessing']['imbalance_strategy'], config)
-    
-    print("\nStarting CV Loop...")
-    for tr_idx, va_idx in tqdm(cv.split(X, y), total=t_config['cv_splits'], desc="Ensemble Folds"):
-        X_tr, y_tr = X.iloc[tr_idx], y.iloc[tr_idx]
-        X_va, y_va = X.iloc[va_idx], y.iloc[va_idx]
-        
-        if sampler: X_tr, y_tr = sampler.fit_resample(X_tr, y_tr)
-            
-        fold_blend_preds = np.zeros(len(X_va))
-        total_weight = sum([est['weight'] for est in estimators])
-        
-        for est_conf in estimators:
-            model = get_model(est_conf['name'], est_conf.get('params', {}), t_config['preprocessing']['imbalance_strategy'], config, is_trial=False)
-            model.fit(X_tr, y_tr)
-            fold_blend_preds += model.predict_proba(X_va)[:, 1] * (est_conf['weight'] / total_weight)
-            
-        oof_preds[va_idx] = fold_blend_preds
-        
-    save_evaluation_report(y, oof_preds, "ensemble_cv_oof", models_dir, threshold)
-    
-    print("\nRetraining all models on 100% data...")
-    X_full, y_full = X, y
-    if sampler: X_full, y_full = sampler.fit_resample(X_full, y_full)
-    
-    final_models = []
-    for est_conf in estimators:
-        model = get_model(est_conf['name'], est_conf.get('params', {}), t_config['preprocessing']['imbalance_strategy'], config, is_trial=False)
-        model.fit(X_full, y_full)
-        joblib.dump(model, models_dir / f"{est_conf['name']}_ensemble_model.pkl")
-        final_models.append((model, est_conf['weight']))
-        
-    predict_test_and_submit(final_models, config, is_ensemble=True)
+    best_config = merged_estimator_config(est_config, best_params)
+    search_preds = cross_validated_single_predictions(
+        X_search,
+        y_search,
+        best_config,
+        config,
+        desc=f"{name} Search Best CV",
+        is_trial=True,
+        feature_selection_enabled=feature_selection_enabled,
+    )
+    save_evaluation_report(y_search, search_preds, f"{name}_search", models_dir, config, "search_subsample_cv")
+    return best_config
 
-def predict_test_and_submit(model_obj, config, is_ensemble=False):
-    print("\nGenerating Predictions...")
-    test_path = Path(config['data']['final']['test'])
-    if not test_path.exists(): return
+
+def run_ensemble_phases(X, y, config, models_dir, metadata):
+    phases = config["training"]["phases"]
+    estimators = config["training"]["models"]["estimators"]
+
+    if phases["validate"] and config["training"]["run_full_oof_validation"]:
+        print("Scoring ensemble with full-data OOF validation...")
+        oof_preds = cross_validated_ensemble_predictions(X, y, estimators, config)
+        save_evaluation_report(y, oof_preds, "ensemble_cv_oof", models_dir, config, "out_of_fold")
+    elif phases["validate"]:
+        print("Skipping full-data OOF validation by run profile.")
+
+    if phases["final_fit"]:
+        final_models, preprocessor, accelerators = fit_final_ensemble(X, y, estimators, config, models_dir)
+        metadata["selected_accelerators"].update(accelerators)
+        predict_test_and_submit(final_models, config, preprocessor=preprocessor, is_ensemble=True)
+
+
+def predict_test_and_submit(model_obj, config, preprocessor=None, is_ensemble=False):
+    print("Generating predictions...")
+    test_path = Path(config["data"]["final"]["test"])
+    if not test_path.exists():
+        raise FileNotFoundError(f"Test data not found at {test_path}. Run --process first.")
+
     df_test = pd.read_csv(test_path)
-    ids = df_test[config['training']['id_col']]
-    X_test = clean_column_names(df_test.drop(columns=[config['training']['id_col']]))
-    
-    # Apply artifacts
-    models_dir = Path(config['training']['artifact_paths']['models_dir'])
-    scaler_name = config['training']['preprocessing']['scaler']
-    scaler_path = models_dir / f"{scaler_name}_scaler.pkl"
-    if scaler_path.exists():
-        scaler = joblib.load(scaler_path)
-        X_test = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns, index=X_test.index)
-        
-    selector_path = models_dir / "feature_selector.pkl"
-    if selector_path.exists():
-        selector = joblib.load(selector_path)
-        X_test = X_test[X_test.columns[selector.get_support()]]
-    
+    id_col = config["training"]["id_col"]
+    target_col = config["training"]["target_col"]
+    if target_col in df_test.columns:
+        raise ValueError(f"{target_col} found in test data.")
+
+    ids = df_test[id_col]
+    X_test = clean_column_names(df_test.drop(columns=[id_col]))
+
+    models_dir = Path(config["training"]["artifact_paths"]["models_dir"])
+    if preprocessor is None:
+        preprocessor_path = model_artifact_path(models_dir, config, "preprocessor")
+        if not preprocessor_path.exists():
+            raise FileNotFoundError(f"Preprocessor artifact not found at {preprocessor_path}.")
+        preprocessor = joblib.load(preprocessor_path)
+
+    X_test = preprocessor.transform(X_test)
+
     if not is_ensemble:
         preds = model_obj.predict_proba(X_test)[:, 1]
     else:
         preds = np.zeros(len(X_test))
-        total_weight = sum([w for _, w in model_obj])
+        total_weight = sum(weight for _, weight in model_obj)
         for model, weight in model_obj:
             preds += model.predict_proba(X_test)[:, 1] * (weight / total_weight)
 
-    sub = pd.DataFrame({config['training']['id_col']: ids, config['training']['target_col']: preds})
-    sub.to_csv(config['training']['artifact_paths']['submission'], index=False)
-    print(f"Submission saved to {config['training']['artifact_paths']['submission']}")
+    submission_path = Path(config["training"]["artifact_paths"]["submission"])
+    submission_path.parent.mkdir(parents=True, exist_ok=True)
+    submission = pd.DataFrame({id_col: ids, target_col: preds})
+    if len(submission) != len(df_test):
+        raise ValueError("Submission row count does not match test row count.")
+    submission.to_csv(submission_path, index=False)
+    print(f"Submission saved to {submission_path}")

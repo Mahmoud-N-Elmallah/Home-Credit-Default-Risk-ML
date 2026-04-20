@@ -17,14 +17,12 @@ def main():
     args = parser.parse_args()
 
     if not any([args.process, args.train, args.all]):
-        print("Please specify a step: --process, --train, or --all")
-        return
+        parser.error("Please specify a step: --process, --train, or --all")
 
     print(f"Loading config from {args.config}...")
     config_path = Path(args.config)
     if not config_path.exists():
-        print(f"Config file {args.config} not found.")
-        return
+        raise FileNotFoundError(f"Config file {args.config} not found.")
         
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
@@ -38,6 +36,7 @@ def main():
         run_training(config)
         
     print("\nPipeline finished.")
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

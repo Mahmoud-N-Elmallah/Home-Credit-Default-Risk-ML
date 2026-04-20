@@ -9,7 +9,7 @@ Data/
 catboost_info/
 Notebooks/
 .gemini/
-
+compressed.md
 
 
 # C extensions

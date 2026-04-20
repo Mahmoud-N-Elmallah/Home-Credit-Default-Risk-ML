@@ -2,10 +2,46 @@
 
 globals:
   random_state: 42
-  division_epsilon: 1e-8
+  division_epsilon: 1e-9
   n_jobs: -1
 
 data:
+  csv:
+    infer_schema_length: 10000
+    null_values: [ "", "NA", "NaN", "nan", "NULL" ]
+    ignore_errors: false
+    schema_overrides:
+      SK_ID_CURR: "Int64"
+      SK_ID_BUREAU: "Int64"
+      SK_ID_PREV: "Int64"
+      AMT_INCOME_TOTAL: "Float64"
+      AMT_CREDIT: "Float64"
+      AMT_ANNUITY: "Float64"
+      AMT_GOODS_PRICE: "Float64"
+      AMT_PAYMENT: "Float64"
+      AMT_INSTALMENT: "Float64"
+      DAYS_ENTRY_PAYMENT: "Float64"
+      DAYS_INSTALMENT: "Float64"
+      AMT_BALANCE: "Float64"
+      AMT_CREDIT_LIMIT_ACTUAL: "Float64"
+      AMT_DRAWINGS_CURRENT: "Float64"
+      AMT_APPLICATION: "Float64"
+      DAYS_DECISION: "Float64"
+      DAYS_EMPLOYED: "Float64"
+      DAYS_BIRTH: "Float64"
+      DAYS_REGISTRATION: "Float64"
+      DAYS_ID_PUBLISH: "Float64"
+      MONTHS_BALANCE: "Float64"
+      DAYS_CREDIT: "Float64"
+      AMT_CREDIT_SUM: "Float64"
+      AMT_CREDIT_SUM_DEBT: "Float64"
+      AMT_CREDIT_SUM_LIMIT: "Float64"
+      AMT_CREDIT_SUM_OVERDUE: "Float64"
+      CNT_INSTALMENT: "Float64"
+      CNT_INSTALMENT_FUTURE: "Float64"
+      SK_DPD: "Float64"
+      SK_DPD_DEF: "Float64"
+
   raw:
     application_train: "Data/Raw/application_train.csv"
     application_test: "Data/Raw/application_test.csv"
@@ -24,6 +60,19 @@ pipeline:
   high_null_threshold: 0.6
   correlation_threshold: 0.95
   variance_threshold: 0.995
+  warn_on_stale_submission: true
+  fill_values:
+    aux_missing: 0
+    generated_missing: 0
+    test_missing_column: 0
+  categorical_encoding:
+    binary_strategy: "ordinal"
+    binary_values: [ 0, 1 ]
+    unknown_value: -1
+    one_hot_drop_first: true
+    null_category_label: "__NULL__"
+    frequency_unknown_value: 1
+    frequency_normalize: false
   anomaly_fix:
     days_employed: 365243
   aux_table_prefixes:
@@ -34,6 +83,27 @@ pipeline:
     - "cc_"
 
   feature_engineering:
+    document_flag_prefix: "FLAG_DOCUMENT_"
+    base_ratio_features:
+      - name: "DAYS_EMPLOYED_PERC"
+        numerator: "DAYS_EMPLOYED"
+        denominator: "DAYS_BIRTH"
+      - name: "INCOME_PER_PERSON"
+        numerator: "AMT_INCOME_TOTAL"
+        denominator: "CNT_FAM_MEMBERS"
+    global_ratio_features:
+      - name: "CREDIT_INCOME_RATIO"
+        numerator: "AMT_CREDIT"
+        denominator: "AMT_INCOME_TOTAL"
+      - name: "ANNUITY_INCOME_RATIO"
+        numerator: "AMT_ANNUITY"
+        denominator: "AMT_INCOME_TOTAL"
+      - name: "CREDIT_TERM"
+        numerator: "AMT_ANNUITY"
+        denominator: "AMT_CREDIT"
+      - name: "GOODS_CREDIT_RATIO"
+        numerator: "AMT_GOODS_PRICE"
+        denominator: "AMT_CREDIT"
     recency_months: [ 6, 12 ] # For time-based aggregations (MONTHS_BALANCE)
     recency_days_prev: [ 365, 730 ] # For previous_application recency (DAYS_DECISION)
     frequency_encoding_cols:
@@ -55,14 +125,77 @@ pipeline:
 training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
+  run_mode: "balanced"
+  run_profiles:
+    fast_dev:
+      cv_splits: 2
+      optuna_n_trials: 5
+      optuna_subsample_rate: 0.15
+      run_full_oof_validation: false
+      feature_selection_enabled_during_search: false
+    balanced:
+      cv_splits: 3
+      optuna_n_trials: 10
+      optuna_subsample_rate: 0.35
+      run_full_oof_validation: true
+      feature_selection_enabled_during_search: false
+    max_quality:
+      cv_splits: 5
+      optuna_n_trials: 20
+      optuna_subsample_rate: 1.0
+      run_full_oof_validation: true
+      feature_selection_enabled_during_search: true
+  phases:
+    search: true
+    validate: true
+    final_fit: true
+  artifact_reuse:
+    allow_stale_artifacts: false
+    metadata: "training_run_metadata.yaml"
+  acceleration:
+    preferred: "gpu"
+    fallback: "cpu"
+    retry_on_failure: true
+    gpu_failure_keywords:
+      - "gpu"
+      - "cuda"
+      - "opencl"
+      - "driver"
+      - "device"
+      - "not compiled"
+      - "not supported"
+      - "no kernel image"
+      - "cuda error"
+      - "catboost/libs/train_lib"
+    models:
+      catboost:
+        gpu_params:
+          task_type: "GPU"
+        cpu_params:
+          task_type: "CPU"
+          thread_count: -1
+      lightgbm:
+        gpu_params:
+          device_type: "gpu"
+        cpu_params:
+          device_type: "cpu"
+          n_jobs: -1
+      xgboost:
+        gpu_params:
+          tree_method: "hist"
+          device: "cuda"
+        cpu_params:
+          tree_method: "hist"
+          device: "cpu"
+          n_jobs: -1
   optimization_metric: "roc_auc"
-  cv_splits: 5
+  cv_splits: 3
   cv_shuffle: true
-  classification_threshold: 0.2
+  classification_threshold: 0.5
   imbalance_ratio: 11.3
-  optuna_n_trials: 20
+  optuna_n_trials: 10
   optuna_direction: "maximize"
-  optuna_subsample_rate: 0.3 # Use 30% of data for hyperparameter search speed
+  optuna_subsample_rate: 0.35
 
   verbosity:
     catboost_trial: 0
@@ -74,13 +207,35 @@ training:
   artifact_paths:
     models_dir: "Models"
     submission: "Data/final/submission.csv"
+    preprocessor: "training_preprocessor.pkl"
+    best_params: "{model_name}_best_params.yaml"
+    single_model: "{model_name}_optuna_best_model.pkl"
+    ensemble_model: "{model_name}_ensemble_model.pkl"
+    evaluation_report: "{model_name}_evaluation_report.txt"
+    confusion_matrix: "{model_name}_confusion_matrix.png"
+
+  evaluation:
+    report_digits: 4
+    confusion_matrix_figsize: [ 6, 5 ]
+    confusion_matrix_cmap: "Blues"
 
   preprocessing:
     scaler: "robust"
-    imbalance_strategy: "class_weight"
+    imbalance:
+      strategy: "class_weight"
+      sampler_params: { }
+      class_weight_params:
+        catboost:
+          auto_class_weights: "Balanced"
+        lightgbm:
+          is_unbalance: true
+        xgboost:
+          scale_pos_weight: 11.3
     feature_selection:
       method: "lgbm"
       max_features: 150
+      threshold: "-inf"
+      enabled_during_search: false
       selector_params:
         n_estimators: 200
         verbose: -1
@@ -95,7 +250,11 @@ training:
           iterations: 1000
           learning_rate: 0.05
           depth: 6
-          task_type: "GPU"
+          early_stopping_rounds: 50
+          eval_fraction: 0.1
+          allow_writing_files: false
+          bootstrap_type: "Bernoulli"
+          rsm: 0.8
         search_space:
           model__iterations: { type: "int", low: 500, high: 2000 }
           model__learning_rate: { type: "float", low: 0.01, high: 0.1, log: true }
@@ -108,7 +267,10 @@ training:
           n_estimators: 1000
           learning_rate: 0.05
           max_depth: 6
-          device_type: "gpu"
+          early_stopping_rounds: 50
+          eval_fraction: 0.1
+          force_col_wise: true
+          num_threads: -1
         search_space:
           model__num_leaves: { type: "int", low: 20, high: 128 }
           model__max_depth: { type: "int", low: 4, high: 12 }
@@ -121,8 +283,9 @@ training:
           n_estimators: 1000
           learning_rate: 0.05
           max_depth: 6
-          tree_method: "hist"
-          device: "cuda"
+          early_stopping_rounds: 50
+          eval_fraction: 0.1
+          n_jobs: -1
         search_space:
           model__n_estimators: { type: "int", low: 500, high: 2000 }
           model__learning_rate: { type: "float", low: 0.01, high: 0.1, log: true }
