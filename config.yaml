@@ -253,7 +253,7 @@ pipeline:
 training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
-  run_mode: "balanced"
+  run_mode: "balanced_deep"
   run_profiles:
     fast_dev:
       cv_splits: 2
@@ -267,9 +267,15 @@ training:
       optuna_subsample_rate: 0.35
       run_full_oof_validation: true
       feature_selection_enabled_during_search: false
+    balanced_deep:
+      cv_splits: 3
+      optuna_n_trials: 30
+      optuna_subsample_rate: 0.5
+      run_full_oof_validation: true
+      feature_selection_enabled_during_search: false
     max_quality:
       cv_splits: 5
-      optuna_n_trials: 20
+      optuna_n_trials: 50
       optuna_subsample_rate: 1.0
       run_full_oof_validation: true
       feature_selection_enabled_during_search: true
@@ -295,6 +301,19 @@ training:
     save_threshold_table: true
     save_lift_table: true
     save_curves: true
+    save_feature_importance: true
+    feature_importance_top_n: 50
+  model_comparison:
+    enabled: true
+    candidates: [ "catboost", "lightgbm" ]
+    max_trials_per_model: 5
+    cv_splits: 3
+    subsample_rate: 0.35
+  calibration:
+    enabled: true
+    method: "isotonic"
+    cv_splits: 3
+    apply_to_submission: false
   acceleration:
     preferred: "gpu"
     fallback: "cpu"
@@ -356,6 +375,11 @@ training:
     oof_predictions: "reports/oof_predictions.csv"
     threshold_table: "reports/threshold_table.csv"
     lift_table: "reports/lift_deciles.csv"
+    model_comparison_csv: "reports/model_comparison.csv"
+    model_comparison_yaml: "reports/model_comparison.yaml"
+    feature_importance: "reports/feature_importance.csv"
+    feature_importance_plot: "plots/feature_importance_top.png"
+    calibration_diagnostics: "reports/calibration_diagnostics.yaml"
     confusion_matrix: "plots/confusion_matrix.png"
     roc_curve: "plots/roc_curve.png"
     pr_curve: "plots/pr_curve.png"
@@ -387,6 +411,12 @@ training:
       selector_params:
         n_estimators: 200
         verbose: -1
+    feature_pruning:
+      enabled: false
+      source: "feature_importance"
+      min_importance: 0.0
+      keep_top_n:
+      always_keep: []
 
   models:
     primary: "catboost"

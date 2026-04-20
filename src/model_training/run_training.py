@@ -30,6 +30,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.calibration import calibration_curve
+from sklearn.isotonic import IsotonicRegression
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from tqdm import tqdm
@@ -100,10 +101,14 @@ def primary_model_name(config):
 
 def get_primary_estimator_config(config):
     primary = primary_model_name(config)
+    return get_estimator_config_by_name(config, primary)
+
+
+def get_estimator_config_by_name(config, name):
     for candidate in config["training"]["models"]["candidates"]:
-        if candidate["name"] == primary:
+        if candidate["name"] == name:
             return candidate
-    raise ValueError(f"training.models.primary not found in training.models.candidates: {primary}")
+    raise ValueError(f"Model not found in training.models.candidates: {name}")
 
 
 def create_experiment_dir(models_root, config):
@@ -303,6 +308,8 @@ def merge_model_params(name, params, config, is_trial=True, accelerator=None):
         verbosity = config["training"]["verbosity"]
         verbosity_key = "catboost_trial" if is_trial else "catboost_final"
         model_params.setdefault("verbose", verbosity.get(verbosity_key, 0))
+    elif name == "lightgbm":
+        model_params.setdefault("verbosity", config["training"]["verbosity"].get("lgbm", -1))
 
     return model_params
 
@@ -397,6 +404,7 @@ class TrainingPreprocessor:
         self.scaler = None
         self.selector = None
         self.selected_columns = None
+        self.pruned_columns = None
 
     def fit(self, X, y):
         t_config = self.config["training"]
@@ -416,6 +424,16 @@ class TrainingPreprocessor:
         elif fs_config["method"] not in [None, "none", "lgbm"]:
             raise ValueError(f"Unknown feature_selection.method: {fs_config['method']}")
 
+        pruning_config = t_config["preprocessing"].get("feature_pruning", {})
+        if pruning_config.get("enabled", False):
+            self.pruned_columns = fit_feature_pruning_columns(
+                X_work,
+                y,
+                self.selected_columns,
+                self.selector,
+                pruning_config,
+            )
+
         return self
 
     def transform(self, X):
@@ -427,6 +445,11 @@ class TrainingPreprocessor:
             if missing_cols:
                 raise ValueError(f"Missing selected columns during transform: {missing_cols[:10]}")
             X_work = X_work[self.selected_columns]
+        if self.pruned_columns is not None:
+            missing_cols = [col for col in self.pruned_columns if col not in X_work.columns]
+            if missing_cols:
+                raise ValueError(f"Missing pruned columns during transform: {missing_cols[:10]}")
+            X_work = X_work[self.pruned_columns]
         return X_work
 
     def fit_transform(self, X, y):
@@ -448,6 +471,31 @@ def fit_lgbm_selector(X, y, selector_params, fs_config, config, seed):
     return selector
 
 
+def fit_feature_pruning_columns(X, y, selected_columns, selector, pruning_config):
+    if pruning_config["source"] != "feature_importance":
+        raise ValueError(f"Unknown feature_pruning.source: {pruning_config['source']}")
+
+    candidate_columns = selected_columns or X.columns.to_list()
+    if selector is not None and hasattr(selector, "estimator_") and hasattr(selector.estimator_, "feature_importances_"):
+        importances = pd.Series(selector.estimator_.feature_importances_, index=X.columns)
+    else:
+        importances = pd.Series(np.ones(len(X.columns)), index=X.columns)
+
+    scores = importances.reindex(candidate_columns).fillna(0.0)
+    min_importance = float(pruning_config["min_importance"])
+    keep_columns = scores[scores >= min_importance].sort_values(ascending=False).index.to_list()
+
+    keep_top_n = pruning_config.get("keep_top_n")
+    if keep_top_n is not None:
+        keep_columns = keep_columns[: int(keep_top_n)]
+
+    always_keep = [col for col in pruning_config.get("always_keep", []) if col in candidate_columns]
+    keep_columns = list(dict.fromkeys(always_keep + keep_columns))
+    if not keep_columns:
+        raise ValueError("Feature pruning removed all columns. Relax feature_pruning thresholds.")
+    return keep_columns
+
+
 def calculate_metric(y_true, y_pred_prob, metric_name, threshold):
     if metric_name == "roc_auc":
         return roc_auc_score(y_true, y_pred_prob)
@@ -464,6 +512,42 @@ def model_artifact_path(models_dir, config, key, **kwargs):
     resolved = path if path.is_absolute() else models_dir / path
     resolved.parent.mkdir(parents=True, exist_ok=True)
     return resolved
+
+
+def model_feature_importances(model, model_name, feature_names):
+    if model_name == "catboost":
+        values = model.get_feature_importance()
+    elif hasattr(model, "feature_importances_"):
+        values = model.feature_importances_
+    else:
+        raise ValueError(f"Feature importance is not available for model: {model_name}")
+
+    if len(values) != len(feature_names):
+        raise ValueError("Feature importance length does not match processed feature count.")
+    frame = pd.DataFrame({"feature": feature_names, "importance": values})
+    frame["importance"] = frame["importance"].astype(float)
+    return frame.sort_values("importance", ascending=False).reset_index(drop=True)
+
+
+def save_feature_importance(model, model_name, feature_names, models_dir, config):
+    reports_config = config["training"]["reports"]
+    if not reports_config.get("save_feature_importance", False):
+        return
+
+    frame = model_feature_importances(model, model_name, feature_names)
+    frame.to_csv(model_artifact_path(models_dir, config, "feature_importance"), index=False)
+
+    top_n = int(reports_config["feature_importance_top_n"])
+    top = frame.head(top_n).sort_values("importance", ascending=True)
+    if top.empty:
+        return
+    plt.figure(figsize=(8, max(4, min(12, 0.22 * len(top)))))
+    plt.barh(top["feature"], top["importance"])
+    plt.xlabel("Importance")
+    plt.title(f"Top {min(top_n, len(frame))} Feature Importances: {model_name}")
+    plt.tight_layout()
+    plt.savefig(model_artifact_path(models_dir, config, "feature_importance_plot"))
+    plt.close()
 
 
 def threshold_grid(config):
@@ -621,6 +705,53 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_nam
     plt.close()
 
 
+def calibrated_oof_predictions(y_true, y_pred_prob, config):
+    calibration_config = config["training"]["calibration"]
+    method = calibration_config["method"]
+    if method != "isotonic":
+        raise ValueError(f"Unknown calibration.method: {method}")
+
+    y_array = np.asarray(y_true)
+    pred_array = np.asarray(y_pred_prob)
+    min_class_count = int(pd.Series(y_array).value_counts().min())
+    n_splits = min(int(calibration_config["cv_splits"]), min_class_count)
+    if n_splits < 2:
+        raise ValueError("Calibration diagnostics require at least two positive and negative samples.")
+
+    calibrated = np.full(len(pred_array), np.nan)
+    cv = StratifiedKFold(
+        n_splits=n_splits,
+        shuffle=config["training"]["cv_shuffle"],
+        random_state=config["globals"]["random_state"],
+    )
+    for train_idx, valid_idx in cv.split(pred_array.reshape(-1, 1), y_array):
+        calibrator = IsotonicRegression(out_of_bounds="clip")
+        calibrator.fit(pred_array[train_idx], y_array[train_idx])
+        calibrated[valid_idx] = calibrator.predict(pred_array[valid_idx])
+
+    if np.isnan(calibrated).any():
+        raise ValueError("Calibration diagnostics incomplete; at least one row was not calibrated.")
+    return np.clip(calibrated, 0.0, 1.0)
+
+
+def save_calibration_diagnostics(y_true, y_pred_prob, models_dir, config):
+    if not config["training"]["calibration"]["enabled"]:
+        return None
+
+    calibrated = calibrated_oof_predictions(y_true, y_pred_prob, config)
+    diagnostics = {
+        "method": config["training"]["calibration"]["method"],
+        "cv_splits": config["training"]["calibration"]["cv_splits"],
+        "scope": "out_of_fold_probability_calibration",
+        "uncalibrated_brier_score": float(brier_score_loss(y_true, y_pred_prob)),
+        "calibrated_brier_score": float(brier_score_loss(y_true, calibrated)),
+        "apply_to_submission": config["training"]["calibration"]["apply_to_submission"],
+    }
+    with open(model_artifact_path(models_dir, config, "calibration_diagnostics"), "w", encoding="utf-8") as file:
+        yaml.safe_dump(diagnostics, file, sort_keys=False)
+    return diagnostics
+
+
 def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, evaluation_scope, ids=None):
     allowed_scopes = {"out_of_fold", "search_subsample_cv", "final_train_fit"}
     if evaluation_scope not in allowed_scopes:
@@ -649,6 +780,11 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
             "accuracy": float(accuracy_score(y_true, y_pred_bin)),
         },
     }
+    calibration_diagnostics = None
+    if evaluation_scope == "out_of_fold":
+        calibration_diagnostics = save_calibration_diagnostics(y_true, y_pred_prob, models_dir, config)
+        if calibration_diagnostics is not None:
+            metrics["calibration"] = calibration_diagnostics
 
     report_str = f"Model: {model_name}\n"
     report_str += "=" * 40 + "\n"
@@ -660,6 +796,8 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     report_str += f"ROC AUC Score: {metrics['ranking']['roc_auc']:.4f}\n"
     report_str += f"Average Precision (PR AUC): {metrics['ranking']['average_precision']:.4f}\n"
     report_str += f"Brier Score: {metrics['ranking']['brier_score']:.4f}\n"
+    if calibration_diagnostics is not None:
+        report_str += f"Calibrated Brier Score: {calibration_diagnostics['calibrated_brier_score']:.4f}\n"
     report_str += f"Precision: {metrics['threshold_metrics']['precision']:.4f}\n"
     report_str += f"Recall: {metrics['threshold_metrics']['recall']:.4f}\n"
     report_str += f"F1 Score: {metrics['threshold_metrics']['f1']:.4f}\n"
@@ -774,6 +912,7 @@ def fit_final_single_model(X, y, estimator_config, config, models_dir, model_nam
     )
     joblib.dump(preprocessor, model_artifact_path(models_dir, config, "preprocessor"))
     joblib.dump(model, model_artifact_path(models_dir, config, "single_model", model_name=model_name))
+    save_feature_importance(model, estimator_config["name"], X_processed.columns.to_list(), models_dir, config)
     return model, preprocessor, accelerator
 
 
@@ -787,6 +926,110 @@ def configure_optuna_logging(config):
         "CRITICAL": optuna.logging.CRITICAL,
     }
     optuna.logging.set_verbosity(levels.get(level_name, optuna.logging.INFO))
+
+
+def comparison_training_config(config):
+    comparison_config = config["training"]["model_comparison"]
+    resolved = deepcopy(config)
+    resolved["training"]["cv_splits"] = comparison_config["cv_splits"]
+    resolved["training"]["optuna_n_trials"] = comparison_config["max_trials_per_model"]
+    resolved["training"]["optuna_subsample_rate"] = comparison_config["subsample_rate"]
+    return resolved
+
+
+def model_comparison_sample(X, y, ids, config):
+    comparison_config = config["training"]["model_comparison"]
+    subsample_rate = comparison_config["subsample_rate"]
+    if subsample_rate >= 1.0:
+        return X, y, ids
+    X_sample, _, y_sample, _, ids_sample, _ = train_test_split(
+        X,
+        y,
+        ids,
+        train_size=subsample_rate,
+        stratify=y,
+        random_state=config["globals"]["random_state"],
+    )
+    return X_sample, y_sample, ids_sample
+
+
+def compare_one_model(X, y, config, est_config, seed):
+    t_config = config["training"]
+    name = est_config["name"]
+    search_space = est_config.get("search_space", {})
+    feature_selection_enabled = t_config["preprocessing"]["feature_selection"]["enabled_during_search"]
+
+    def objective(trial):
+        trial_params = suggest_params(trial, search_space)
+        model_params = {key.replace("model__", ""): value for key, value in trial_params.items()}
+        candidate_config = merged_estimator_config(est_config, model_params)
+        preds = cross_validated_single_predictions(
+            X,
+            y,
+            candidate_config,
+            config,
+            desc=f"{name} Compare CV",
+            is_trial=True,
+            feature_selection_enabled=feature_selection_enabled,
+        )
+        return calculate_metric(y, preds, t_config["optimization_metric"], t_config["classification_threshold"])
+
+    study = optuna.create_study(
+        direction=t_config["optuna_direction"],
+        sampler=optuna.samplers.TPESampler(seed=seed),
+    )
+    study.optimize(objective, n_trials=t_config["optuna_n_trials"], show_progress_bar=True)
+    best_params = {key.replace("model__", ""): value for key, value in study.best_params.items()}
+    best_config = merged_estimator_config(est_config, best_params)
+    preds = cross_validated_single_predictions(
+        X,
+        y,
+        best_config,
+        config,
+        desc=f"{name} Compare Best CV",
+        is_trial=True,
+        feature_selection_enabled=feature_selection_enabled,
+    )
+    return {
+        "model": name,
+        "evaluation_scope": "search_subsample_cv",
+        "metric_name": t_config["optimization_metric"],
+        "metric_value": float(calculate_metric(y, preds, t_config["optimization_metric"], t_config["classification_threshold"])),
+        "roc_auc": float(roc_auc_score(y, preds)),
+        "average_precision": float(average_precision_score(y, preds)),
+        "brier_score": float(brier_score_loss(y, preds)),
+        "trials": int(t_config["optuna_n_trials"]),
+        "cv_splits": int(t_config["cv_splits"]),
+        "subsample_rate": float(t_config["optuna_subsample_rate"]),
+        "best_params": best_params,
+    }
+
+
+def run_model_comparison(X, y, ids, config, models_dir, seed, metadata):
+    comparison_config = config["training"]["model_comparison"]
+    if not comparison_config["enabled"]:
+        return
+
+    compare_config = comparison_training_config(config)
+    X_compare, y_compare, _ = model_comparison_sample(X, y, ids, compare_config)
+    rows = []
+    for model_name in comparison_config["candidates"]:
+        est_config = get_estimator_config_by_name(compare_config, model_name)
+        rows.append(compare_one_model(X_compare, y_compare, compare_config, est_config, seed))
+
+    csv_rows = [{key: value for key, value in row.items() if key != "best_params"} for row in rows]
+    pd.DataFrame(csv_rows).sort_values("metric_value", ascending=False).to_csv(
+        model_artifact_path(models_dir, config, "model_comparison_csv"),
+        index=False,
+    )
+    payload = {
+        "evaluation_scope": "search_subsample_cv",
+        "metric_name": config["training"]["optimization_metric"],
+        "rows": rows,
+    }
+    with open(model_artifact_path(models_dir, config, "model_comparison_yaml"), "w", encoding="utf-8") as file:
+        yaml.safe_dump(payload, file, sort_keys=False)
+    metadata["model_comparison"] = payload
 
 
 def run_training(config):
@@ -815,6 +1058,7 @@ def run_training(config):
     metadata = build_run_metadata(config, X, y, train_path, experiment_id, timestamp)
     validate_reusable_artifacts(models_dir, config, metadata)
 
+    run_model_comparison(X, y, train_ids, config, models_dir, seed, metadata)
     run_single_phases(X, y, train_ids, config, models_dir, seed, metadata)
 
     metadata["selected_accelerators"].update(
@@ -929,6 +1173,9 @@ def run_single_search(X, y, ids, config, models_dir, seed, est_config):
 
 def predict_test_and_submit(model_obj, config, models_dir, preprocessor=None):
     print("Generating predictions...")
+    if config["training"]["calibration"].get("apply_to_submission", False):
+        raise ValueError("calibration.apply_to_submission is not supported in this diagnostics-only iteration.")
+
     test_path = Path(config["data"]["final"]["test"])
     if not test_path.exists():
         raise FileNotFoundError(f"Test data not found at {test_path}. Run --process first.")

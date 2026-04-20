@@ -49,6 +49,7 @@ Training defaults to the `balanced` profile. Change `training.run_mode` in `conf
 
 - `fast_dev` for quick smoke runs.
 - `balanced` for default speed/quality.
+- `balanced_deep` for deeper search while keeping 3-fold validation.
 - `max_quality` for slower, broader validation/search.
 
 Run both:
@@ -76,6 +77,8 @@ Run both:
 Project behavior is controlled from `config.yaml`: file paths, CSV parsing, feature engineering sets, feature source columns, recency windows, last-N windows, aggregation source columns/prefixes, cleanup thresholds, categorical encoding, feature selection, imbalance handling, acceleration fallback, run profiles, training phases, experiment folders, threshold tuning, primary model choice, candidate model parameters, Optuna search spaces, artifact names, and evaluation settings.
 
 Training is single-model by design. Set `training.models.primary` to one of `training.models.candidates` to choose CatBoost, LightGBM, or XGBoost without changing code.
+
+Optional model comparison, feature-importance reports, feature pruning, and calibration diagnostics are controlled under `training.model_comparison`, `training.reports`, `training.preprocessing.feature_pruning`, and `training.calibration`.
 
 Training uses `training.acceleration.preferred` first and retries `training.acceleration.fallback` when GPU support fails. Model-specific GPU/CPU parameters live under `training.acceleration.models`.
 
