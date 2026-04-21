@@ -1,0 +1,25 @@
+Model: catboost_optuna
+========================================
+Evaluation Scope: out_of_fold
+Run Mode: balanced
+Classification Threshold: 0.6800
+Threshold Source: oof_max_f1
+Threshold Objective: f1
+ROC AUC Score: 0.7894
+Average Precision (PR AUC): 0.2811
+Brier Score: 0.1788
+Precision: 0.2795
+Recall: 0.4377
+F1 Score: 0.3412
+Accuracy: 0.8635
+Submission Note: Kaggle submission uses probabilities, not thresholded labels.
+
+Classification Report:
+              precision    recall  f1-score   support
+
+           0     0.9480    0.9009    0.9239    282686
+           1     0.2795    0.4377    0.3412     24825
+
+    accuracy                         0.8635    307511
+   macro avg     0.6138    0.6693    0.6325    307511
+weighted avg     0.8941    0.8635    0.8768    307511

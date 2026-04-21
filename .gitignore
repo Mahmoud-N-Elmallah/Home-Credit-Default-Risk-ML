@@ -3,7 +3,13 @@ __pycache__/
 *.py[codz]
 *$py.class
 # my ignores 
-Models/
+Models/*
+!Models/20260420_174015_balanced_catboost/
+Models/20260420_174015_balanced_catboost/*
+!Models/20260420_174015_balanced_catboost/plots/
+!Models/20260420_174015_balanced_catboost/plots/**
+!Models/20260420_174015_balanced_catboost/reports/
+!Models/20260420_174015_balanced_catboost/reports/**
 Data/
 .env
 catboost_info/
