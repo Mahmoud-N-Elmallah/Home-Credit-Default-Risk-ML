@@ -30,6 +30,12 @@ Best project result: **0.79074 public leaderboard ROC AUC** from
 
 ![Top feature importances for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/feature_importance_top.png)
 
+### SHAP Analysis
+
+| Mean Absolute SHAP Contributions | SHAP Beeswarm-Style View |
+| --- | --- |
+| ![SHAP summary bar plot for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/shap_summary_bar.png) | ![SHAP beeswarm-style plot for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/shap_beeswarm_top.png) |
+
 ## What This Project Does
 
 The pipeline has two main stages:

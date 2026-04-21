@@ -1,0 +1,35 @@
+experiment_dir: C:\Projects\Machine leanrign ITI project\Home-Credit-Default-Risk-ML\Models\20260420_174015_balanced_catboost
+sample_size: 5000
+actual_sample_size: 5000
+top_n: 30
+model_path: C:\Projects\Machine leanrign ITI project\Home-Credit-Default-Risk-ML\Models\20260420_174015_balanced_catboost\final_model.pkl
+preprocessor_path: C:\Projects\Machine leanrign ITI project\Home-Credit-Default-Risk-ML\Models\20260420_174015_balanced_catboost\training_preprocessor.pkl
+data_path: C:\Projects\Machine leanrign ITI project\Home-Credit-Default-Risk-ML\Data\final\final_train.csv
+random_state: 42
+input_alignment:
+  aligned: true
+  missing_input_column_count: 1
+  extra_input_column_count: 93
+  missing_input_columns_preview:
+  - CODE_GENDER_M
+  extra_input_columns_preview:
+  - AMT_GOODS_PRICE
+  - REGION_RATING_CLIENT_W_CITY
+  - APARTMENTS_MODE
+  - BASEMENTAREA_MODE
+  - YEARS_BEGINEXPLUATATION_MODE
+  - YEARS_BUILD_MODE
+  - COMMONAREA_MODE
+  - ELEVATORS_MODE
+  - ENTRANCES_MODE
+  - FLOORSMAX_MODE
+  - FLOORSMIN_MODE
+  - LANDAREA_MODE
+  - LIVINGAPARTMENTS_MODE
+  - LIVINGAREA_MODE
+  - NONLIVINGAPARTMENTS_MODE
+  - NONLIVINGAREA_MODE
+  - CREDIT_TO_GOODS_RATIO
+  - DAYS_EMPLOYED_PERC
+  - CODE_GENDER_F
+  - NAME_TYPE_SUITE_Children
