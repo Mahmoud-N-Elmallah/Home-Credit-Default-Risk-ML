@@ -10,10 +10,17 @@ Models/20260420_174015_balanced_catboost/*
 !Models/20260420_174015_balanced_catboost/plots/**
 !Models/20260420_174015_balanced_catboost/reports/
 !Models/20260420_174015_balanced_catboost/reports/**
+!Models/baseline/
+Models/baseline/*
+!Models/baseline/evaluation_report.txt
+!Models/baseline/confusion_matrix.png
+!Models/baseline/feature_importance_top.png
+!Models/baseline/roc_curve.png
 Data/
 .env
 catboost_info/
-Notebooks/
+Notebooks/*
+!Notebooks/Baseline Model.ipynb
 .gemini/
 compressed.md
 

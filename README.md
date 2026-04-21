@@ -5,14 +5,26 @@ competition. The project builds customer-level features from the raw Home Credit
 tables, trains one configured primary model, evaluates it with out-of-fold
 validation and produces a submission csv.
 
-Best project result: **0.791 public leaderboard ROC AUC** from
+Best project result: **0.79074 public leaderboard ROC AUC** from
 `Models/20260420_174015_balanced_catboost`.
 
-## Best Model Visuals
+## Project Pipeline
 
-### ROC Curve
+![Project pipeline diagram](docs/project_pipeline_diagram.svg)
 
-![ROC curve for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/roc_curve.png)
+## Model Visuals
+
+### ROC Curve Comparison
+
+| Best Balanced CatBoost | Vanilla Baseline CatBoost |
+| --- | --- |
+| ![ROC curve for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/roc_curve.png) | ![ROC curve for the vanilla baseline CatBoost experiment](Models/baseline/roc_curve.png) |
+
+### Classification Report Comparison
+
+| Best Balanced CatBoost | Vanilla Baseline CatBoost |
+| --- | --- |
+| <pre>precision    recall  f1-score   support<br><br>0     0.9480    0.9009    0.9239    282686<br>1     0.2795    0.4377    0.3412     24825<br><br>accuracy                         0.8635    307511<br>macro avg     0.6138    0.6693    0.6325    307511<br>weighted avg  0.8941    0.8635    0.8768    307511</pre> | <pre>precision    recall  f1-score   support<br><br>0       0.96      0.72      0.82     56538<br>1       0.17      0.67      0.28      4965<br><br>accuracy                           0.72     61503<br>macro avg       0.57      0.70      0.55     61503<br>weighted avg    0.90      0.72      0.78     61503</pre> |
 
 ### Feature Importance
 

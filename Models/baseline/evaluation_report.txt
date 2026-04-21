@@ -1,0 +1,22 @@
+Baseline CatBoost on raw application table only
+================================================
+{
+  "scope": "vanilla_application_holdout",
+  "roc_auc": 0.7637041340392688,
+  "average_precision": 0.25217424716394604,
+  "classification_threshold": 0.5,
+  "train_rows": 246008,
+  "valid_rows": 61503,
+  "feature_count": 120,
+  "categorical_feature_count": 16
+}
+
+Classification report @ 0.5 threshold
+              precision    recall  f1-score   support
+
+           0       0.96      0.72      0.82     56538
+           1       0.17      0.67      0.28      4965
+
+    accuracy                           0.72     61503
+   macro avg       0.57      0.70      0.55     61503
+weighted avg       0.90      0.72      0.78     61503

@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="620" viewBox="0 0 1600 620" role="img" aria-labelledby="title desc">
+  <title id="title">Home Credit Default Risk ML Project Pipeline</title>
+  <desc id="desc">Diagram showing raw Kaggle tables flowing through processing, feature engineering, Optuna CatBoost training, OOF evaluation, and final artifacts.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#f2f2f2"/>
+    </marker>
+    <style>
+      .bg { fill: #101211; }
+      .box { fill: #111313; stroke: #f2f2f2; stroke-width: 2; }
+      .outer { fill: #5a3033; stroke: #8a5b62; stroke-width: 2; }
+      .inner { fill: #716d4c; stroke: #9a956b; stroke-width: 2; }
+      .text { fill: #f7f3ee; font-family: Arial, Helvetica, sans-serif; font-size: 14px; }
+      .title { fill: #f7f3ee; font-family: Arial, Helvetica, sans-serif; font-size: 17px; font-weight: 700; }
+      .small { fill: #f7f3ee; font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
+      .muted { fill: #ded8cc; font-family: Arial, Helvetica, sans-serif; font-size: 12px; }
+      .arrow { stroke: #f2f2f2; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+      .line { stroke: #f2f2f2; stroke-width: 1.5; fill: none; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="620"/>
+
+  <g transform="translate(20 230)">
+    <rect class="box" x="0" y="0" width="170" height="130" rx="5"/>
+    <text class="title" x="85" y="30" text-anchor="middle">Raw Kaggle Data</text>
+    <line class="line" x1="0" y1="50" x2="170" y2="50"/>
+    <text class="small" x="14" y="74">- application train/test</text>
+    <text class="small" x="14" y="94">- bureau + balance</text>
+    <text class="small" x="14" y="114">- previous, POS, inst, CC</text>
+  </g>
+
+  <g transform="translate(260 215)">
+    <rect class="box" x="0" y="0" width="210" height="160" rx="5"/>
+    <text class="title" x="105" y="30" text-anchor="middle">Processing</text>
+    <line class="line" x1="0" y1="50" x2="210" y2="50"/>
+    <text class="small" x="14" y="74">- load config-driven CSVs</text>
+    <text class="small" x="14" y="94">- encode categoricals</text>
+    <text class="small" x="14" y="114">- engineer ratios/windows</text>
+    <text class="small" x="14" y="134">- aggregate history tables</text>
+    <text class="small" x="14" y="154">- impute + align features</text>
+  </g>
+
+  <g transform="translate(540 225)">
+    <rect class="box" x="0" y="0" width="190" height="140" rx="5"/>
+    <text class="title" x="95" y="30" text-anchor="middle">Final Features</text>
+    <line class="line" x1="0" y1="50" x2="190" y2="50"/>
+    <text class="small" x="14" y="76">- final_train.csv</text>
+    <text class="small" x="14" y="98">- final_test.csv</text>
+    <text class="small" x="14" y="120">- feature_manifest.yaml</text>
+  </g>
+
+  <g transform="translate(790 55)">
+    <rect class="outer" x="0" y="0" width="520" height="510" rx="24"/>
+    <text class="title" x="260" y="38" text-anchor="middle">Optuna Tuning + Leakage-Safe OOF Training</text>
+
+    <rect class="inner" x="58" y="80" width="404" height="188" rx="8"/>
+    <text class="title" x="260" y="112" text-anchor="middle">Fold-Safe Model Pipeline</text>
+
+    <rect class="box" x="92" y="150" width="138" height="62" rx="3"/>
+    <text class="text" x="161" y="176" text-anchor="middle">Training</text>
+    <text class="text" x="161" y="195" text-anchor="middle">Preprocessor</text>
+
+    <rect class="box" x="322" y="150" width="112" height="62" rx="3"/>
+    <text class="text" x="378" y="176" text-anchor="middle">CatBoost</text>
+    <text class="text" x="378" y="195" text-anchor="middle">Classifier</text>
+
+    <line class="arrow" x1="230" y1="181" x2="322" y2="181"/>
+
+    <rect class="box" x="76" y="325" width="150" height="68" rx="3"/>
+    <text class="text" x="151" y="351" text-anchor="middle">Optuna Search</text>
+    <text class="small" x="151" y="372" text-anchor="middle">AUC objective</text>
+
+    <rect class="box" x="318" y="325" width="150" height="68" rx="3"/>
+    <text class="text" x="393" y="351" text-anchor="middle">OOF Validation</text>
+    <text class="small" x="393" y="372" text-anchor="middle">threshold tuning</text>
+
+    <line class="arrow" x1="226" y1="359" x2="318" y2="359"/>
+    <path class="arrow" d="M151 325 V262 H161 V212"/>
+    <path class="arrow" d="M393 325 V262 H378 V212"/>
+
+    <text class="muted" x="260" y="442" text-anchor="middle">GPU preferred, CPU fallback | class weights | feature selection</text>
+  </g>
+
+  <g transform="translate(1360 225)">
+    <rect class="box" x="0" y="0" width="190" height="140" rx="5"/>
+    <text class="title" x="95" y="30" text-anchor="middle">Reports</text>
+    <line class="line" x1="0" y1="50" x2="190" y2="50"/>
+    <text class="small" x="14" y="76">- ROC / PR / lift</text>
+    <text class="small" x="14" y="98">- calibration curve</text>
+    <text class="small" x="14" y="120">- feature importance</text>
+  </g>
+
+  <g transform="translate(1360 410)">
+    <rect class="box" x="0" y="0" width="190" height="108" rx="5"/>
+    <text class="title" x="95" y="30" text-anchor="middle">Artifacts</text>
+    <line class="line" x1="0" y1="50" x2="190" y2="50"/>
+    <text class="small" x="14" y="76">- final_model.pkl</text>
+    <text class="small" x="14" y="96">- submission.csv</text>
+  </g>
+
+  <line class="arrow" x1="190" y1="295" x2="260" y2="295"/>
+  <line class="arrow" x1="470" y1="295" x2="540" y2="295"/>
+  <line class="arrow" x1="730" y1="295" x2="790" y2="295"/>
+  <line class="arrow" x1="1310" y1="295" x2="1360" y2="295"/>
+  <path class="arrow" d="M1310 392 H1335 V464 H1360"/>
+</svg>
