@@ -17,15 +17,12 @@ from sklearn.model_selection import train_test_split
 from src.model_training.run_training import clean_column_names
 
 
-DEFAULT_EXPERIMENT_DIR = "Models/20260420_174015_balanced_catboost"
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Run native CatBoost SHAP analysis for a trained experiment.")
     parser.add_argument("--config", default="config.yaml", help="Path to project config YAML.")
-    parser.add_argument("--experiment-dir", default=DEFAULT_EXPERIMENT_DIR, help="Trained experiment directory.")
-    parser.add_argument("--sample-size", type=int, default=5000, help="Stratified train sample size for SHAP.")
-    parser.add_argument("--top-n", type=int, default=30, help="Number of top SHAP features to plot.")
+    parser.add_argument("--experiment-dir", help="Trained experiment directory. Defaults to analysis.shap config.")
+    parser.add_argument("--sample-size", type=int, help="Stratified train sample size for SHAP.")
+    parser.add_argument("--top-n", type=int, help="Number of top SHAP features to plot.")
     return parser.parse_args()
 
 
@@ -37,6 +34,17 @@ def resolve_path(path):
 def load_yaml(path):
     with open(path, "r", encoding="utf-8") as file:
         return yaml.safe_load(file)
+
+
+def shap_config(config):
+    return config["analysis"]["shap"]
+
+
+def output_path(experiment_dir, relative_path):
+    path = Path(relative_path)
+    resolved = path if path.is_absolute() else experiment_dir / path
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    return resolved
 
 
 def sample_training_rows(df, target_col, sample_size, seed):
@@ -170,61 +178,111 @@ def build_sample_predictions(ids, y, probabilities, expected_values, feature_nam
     )
 
 
-def plot_summary_bar(feature_importance, plots_dir, top_n):
+def plot_summary_bar(feature_importance, output_file, top_n, plot_config):
     top = feature_importance.head(top_n).sort_values("mean_abs_shap", ascending=True)
-    height = max(6, len(top) * 0.28)
-    plt.figure(figsize=(10, height))
-    plt.barh(top["feature"], top["mean_abs_shap"], color="#4c78a8")
+    height = max(
+        float(plot_config["bar_fig_min_height"]),
+        len(top) * float(plot_config["bar_height_per_feature"]),
+    )
+    plt.figure(figsize=(float(plot_config["bar_fig_width"]), height))
+    plt.barh(top["feature"], top["mean_abs_shap"], color=plot_config["bar_color"])
     plt.xlabel("Mean |SHAP value|")
     plt.title(f"Top {len(top)} SHAP Feature Contributions")
     plt.tight_layout()
-    plt.savefig(plots_dir / "shap_summary_bar.png", dpi=160)
+    plt.savefig(output_file, dpi=int(plot_config["dpi"]))
     plt.close()
 
 
-def plot_beeswarm_like(X_processed, shap_values, feature_importance, plots_dir, top_n, seed):
+def plot_beeswarm_like(X_processed, shap_values, feature_importance, output_file, top_n, seed, plot_config):
     top_features = feature_importance.head(top_n)["feature"].to_list()
     rng = np.random.default_rng(seed)
-    plt.figure(figsize=(11, max(7, len(top_features) * 0.3)))
+    plt.figure(
+        figsize=(
+            float(plot_config["beeswarm_fig_width"]),
+            max(
+                float(plot_config["beeswarm_fig_min_height"]),
+                len(top_features) * float(plot_config["beeswarm_height_per_feature"]),
+            ),
+        )
+    )
 
     for y_pos, feature in enumerate(reversed(top_features)):
         col_idx = X_processed.columns.get_loc(feature)
         values = X_processed[feature].to_numpy()
         shap_col = shap_values[:, col_idx]
-        jitter = rng.uniform(-0.28, 0.28, size=len(shap_col))
-        low, high = np.nanpercentile(values, [1, 99])
+        jitter_limit = float(plot_config["beeswarm_jitter"])
+        jitter = rng.uniform(-jitter_limit, jitter_limit, size=len(shap_col))
+        low, high = np.nanpercentile(values, plot_config["beeswarm_value_percentiles"])
         if np.isclose(low, high):
             colors = np.zeros_like(values, dtype=float)
         else:
             colors = np.clip((values - low) / (high - low), 0, 1)
-        plt.scatter(shap_col, y_pos + jitter, c=colors, cmap="coolwarm", s=8, alpha=0.55, linewidths=0)
+        plt.scatter(
+            shap_col,
+            y_pos + jitter,
+            c=colors,
+            cmap=plot_config["beeswarm_cmap"],
+            s=float(plot_config["beeswarm_marker_size"]),
+            alpha=float(plot_config["beeswarm_alpha"]),
+            linewidths=0,
+        )
 
-    plt.axvline(0, color="#333333", linewidth=1)
+    plt.axvline(
+        0,
+        color=plot_config["zero_line_color"],
+        linewidth=float(plot_config["zero_line_width"]),
+    )
     plt.yticks(range(len(top_features)), list(reversed(top_features)))
     plt.xlabel("SHAP value")
     plt.title(f"SHAP Beeswarm-Style Plot: Top {len(top_features)} Features")
     cbar = plt.colorbar()
     cbar.set_label("Scaled feature value")
     plt.tight_layout()
-    plt.savefig(plots_dir / "shap_beeswarm_top.png", dpi=160)
+    plt.savefig(output_file, dpi=int(plot_config["dpi"]))
     plt.close()
 
 
-def plot_dependence(X_processed, shap_values, feature_importance, plots_dir, count=3):
+def plot_dependence(X_processed, shap_values, feature_importance, experiment_dir, shap_settings):
+    plot_config = shap_settings["plot"]
+    dependence_template = shap_settings["plots"]["dependence_template"]
+    count = int(shap_settings["dependence_plot_count"])
     for rank, feature in enumerate(feature_importance.head(count)["feature"], start=1):
         col_idx = X_processed.columns.get_loc(feature)
-        plt.figure(figsize=(7, 5))
-        plt.scatter(X_processed[feature], shap_values[:, col_idx], s=8, alpha=0.4, color="#4c78a8")
-        plt.axhline(0, color="#333333", linewidth=1)
+        plt.figure(figsize=tuple(plot_config["dependence_figsize"]))
+        plt.scatter(
+            X_processed[feature],
+            shap_values[:, col_idx],
+            s=float(plot_config["dependence_marker_size"]),
+            alpha=float(plot_config["dependence_alpha"]),
+            color=plot_config["dependence_color"],
+        )
+        plt.axhline(
+            0,
+            color=plot_config["zero_line_color"],
+            linewidth=float(plot_config["zero_line_width"]),
+        )
         plt.xlabel(f"{feature} (processed value)")
         plt.ylabel("SHAP value")
         plt.title(f"SHAP Dependence: {feature}")
         plt.tight_layout()
-        plt.savefig(plots_dir / f"shap_dependence_top_{rank}.png", dpi=160)
+        plt.savefig(
+            output_path(experiment_dir, dependence_template.format(rank=rank)),
+            dpi=int(plot_config["dpi"]),
+        )
         plt.close()
 
 
-def save_metadata(config, experiment_dir, paths, alignment, sample_size, actual_sample_size, top_n, reports_dir):
+def save_metadata(
+    config,
+    experiment_dir,
+    paths,
+    alignment,
+    sample_size,
+    actual_sample_size,
+    top_n,
+    metadata_path,
+):
+    preview_limit = int(shap_config(config)["metadata_preview_limit"])
     metadata = {
         "experiment_dir": str(experiment_dir),
         "sample_size": int(sample_size),
@@ -238,20 +296,20 @@ def save_metadata(config, experiment_dir, paths, alignment, sample_size, actual_
             "aligned": bool(alignment["aligned"]),
             "missing_input_column_count": len(alignment["missing_input_columns"]),
             "extra_input_column_count": len(alignment["extra_input_columns"]),
-            "missing_input_columns_preview": alignment["missing_input_columns"][:20],
-            "extra_input_columns_preview": alignment["extra_input_columns"][:20],
+            "missing_input_columns_preview": alignment["missing_input_columns"][:preview_limit],
+            "extra_input_columns_preview": alignment["extra_input_columns"][:preview_limit],
         },
     }
-    with open(reports_dir / "shap_metadata.yaml", "w", encoding="utf-8") as file:
+    with open(metadata_path, "w", encoding="utf-8") as file:
         yaml.safe_dump(metadata, file, sort_keys=False)
 
 
-def run_shap_analysis(config_path, experiment_dir, sample_size, top_n):
+def run_shap_analysis(config_path, experiment_dir_arg=None, sample_size_arg=None, top_n_arg=None):
     config = load_yaml(config_path)
-    reports_dir = experiment_dir / "reports"
-    plots_dir = experiment_dir / "plots"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    plots_dir.mkdir(parents=True, exist_ok=True)
+    shap_settings = shap_config(config)
+    experiment_dir = resolve_path(experiment_dir_arg or shap_settings["default_experiment_dir"])
+    sample_size = int(sample_size_arg if sample_size_arg is not None else shap_settings["sample_size"])
+    top_n = int(top_n_arg if top_n_arg is not None else shap_settings["top_n"])
 
     payload = load_and_transform_sample(config, experiment_dir, sample_size)
     X_processed = payload["X_processed"]
@@ -267,8 +325,12 @@ def run_shap_analysis(config_path, experiment_dir, sample_size, top_n):
         shap_values,
     )
 
-    feature_importance.to_csv(reports_dir / "shap_feature_importance.csv", index=False)
-    sample_predictions.to_csv(reports_dir / "shap_sample_predictions.csv", index=False)
+    reports_config = shap_settings["reports"]
+    plots_config = shap_settings["plots"]
+    plot_config = shap_settings["plot"]
+
+    feature_importance.to_csv(output_path(experiment_dir, reports_config["feature_importance"]), index=False)
+    sample_predictions.to_csv(output_path(experiment_dir, reports_config["sample_predictions"]), index=False)
     save_metadata(
         config,
         experiment_dir,
@@ -277,29 +339,35 @@ def run_shap_analysis(config_path, experiment_dir, sample_size, top_n):
         sample_size,
         len(X_processed),
         top_n,
-        reports_dir,
+        output_path(experiment_dir, reports_config["metadata"]),
     )
 
-    plot_summary_bar(feature_importance, plots_dir, top_n)
+    plot_summary_bar(
+        feature_importance,
+        output_path(experiment_dir, plots_config["summary_bar"]),
+        top_n,
+        plot_config,
+    )
     plot_beeswarm_like(
         X_processed,
         shap_values,
         feature_importance,
-        plots_dir,
+        output_path(experiment_dir, plots_config["beeswarm"]),
         top_n,
         config["globals"]["random_state"],
+        plot_config,
     )
-    plot_dependence(X_processed, shap_values, feature_importance, plots_dir)
+    plot_dependence(X_processed, shap_values, feature_importance, experiment_dir, shap_settings)
 
     print(f"SHAP analysis saved to {experiment_dir}")
-    print(feature_importance.head(min(top_n, 10)).to_string(index=False))
+    preview_count = min(top_n, int(shap_settings["console_preview_limit"]))
+    print(feature_importance.head(preview_count).to_string(index=False))
 
 
 def main():
     args = parse_args()
     config_path = resolve_path(args.config)
-    experiment_dir = resolve_path(args.experiment_dir)
-    run_shap_analysis(config_path, experiment_dir, args.sample_size, args.top_n)
+    run_shap_analysis(config_path, args.experiment_dir, args.sample_size, args.top_n)
 
 
 if __name__ == "__main__":

@@ -250,6 +250,66 @@ pipeline:
       total_receivable_col: "AMT_TOTAL_RECEIVABLE"
       receivable_principal_col: "AMT_RECEIVABLE_PRINCIPAL"
       drawings_count_col: "CNT_DRAWINGS_CURRENT"
+
+analysis:
+  shap:
+    default_experiment_dir: "Models/20260420_174015_balanced_catboost"
+    sample_size: 5000
+    top_n: 30
+    dependence_plot_count: 3
+    metadata_preview_limit: 20
+    console_preview_limit: 10
+    reports:
+      feature_importance: "reports/shap_feature_importance.csv"
+      sample_predictions: "reports/shap_sample_predictions.csv"
+      metadata: "reports/shap_metadata.yaml"
+    plots:
+      summary_bar: "plots/shap_summary_bar.png"
+      beeswarm: "plots/shap_beeswarm_top.png"
+      dependence_template: "plots/shap_dependence_top_{rank}.png"
+    plot:
+      dpi: 160
+      bar_fig_width: 10
+      bar_fig_min_height: 6
+      bar_height_per_feature: 0.28
+      bar_color: "#4c78a8"
+      beeswarm_fig_width: 11
+      beeswarm_fig_min_height: 7
+      beeswarm_height_per_feature: 0.3
+      beeswarm_jitter: 0.28
+      beeswarm_marker_size: 8
+      beeswarm_alpha: 0.55
+      beeswarm_cmap: "coolwarm"
+      beeswarm_value_percentiles: [ 1, 99 ]
+      dependence_figsize: [ 7, 5 ]
+      dependence_marker_size: 8
+      dependence_alpha: 0.4
+      dependence_color: "#4c78a8"
+      zero_line_color: "#333333"
+      zero_line_width: 1
+
+baseline:
+  artifact_subdir: "baseline"
+  categorical_missing_label: "__MISSING__"
+  validation_size: 0.2
+  classification_threshold: 0.5
+  verbose: 100
+  top_feature_count: 40
+  plot_dpi: 160
+  roc_figsize: [ 6, 5 ]
+  confusion_matrix_figsize: [ 6, 5 ]
+  feature_importance_figsize: [ 10, 9 ]
+  artifact_paths:
+    final_model: "final_model.pkl"
+    submission: "submission.csv"
+    metrics: "metrics.yaml"
+    evaluation_report: "evaluation_report.txt"
+    config_snapshot: "config_snapshot.yaml"
+    roc_curve: "roc_curve.png"
+    confusion_matrix: "confusion_matrix.png"
+    feature_importance: "feature_importance.csv"
+    feature_importance_plot: "feature_importance_top.png"
+
 training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
@@ -390,6 +450,17 @@ training:
     report_digits: 4
     confusion_matrix_figsize: [ 6, 5 ]
     confusion_matrix_cmap: "Blues"
+    roc_curve_figsize: [ 6, 5 ]
+    pr_curve_figsize: [ 6, 5 ]
+    calibration_curve_figsize: [ 6, 5 ]
+    lift_chart_figsize: [ 7, 5 ]
+    calibration_n_bins: 10
+    calibration_strategy: "quantile"
+    lift_deciles: 10
+    feature_importance_fig_width: 8
+    feature_importance_min_height: 4
+    feature_importance_max_height: 12
+    feature_importance_height_per_feature: 0.22
 
   preprocessing:
     scaler: "robust"

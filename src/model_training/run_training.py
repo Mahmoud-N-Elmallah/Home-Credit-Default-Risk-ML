@@ -542,7 +542,15 @@ def save_feature_importance(model, model_name, feature_names, models_dir, config
     top = frame.head(top_n).sort_values("importance", ascending=True)
     if top.empty:
         return
-    plt.figure(figsize=(8, max(4, min(12, 0.22 * len(top)))))
+    eval_config = config["training"]["evaluation"]
+    height = max(
+        float(eval_config["feature_importance_min_height"]),
+        min(
+            float(eval_config["feature_importance_max_height"]),
+            float(eval_config["feature_importance_height_per_feature"]) * len(top),
+        ),
+    )
+    plt.figure(figsize=(float(eval_config["feature_importance_fig_width"]), height))
     plt.barh(top["feature"], top["importance"])
     plt.xlabel("Importance")
     plt.title(f"Top {min(top_n, len(frame))} Feature Importances: {model_name}")
@@ -601,10 +609,11 @@ def choose_threshold(y_true, y_pred_prob, config, evaluation_scope):
     }, table
 
 
-def build_lift_table(y_true, y_pred_prob):
+def build_lift_table(y_true, y_pred_prob, config):
+    deciles = int(config["training"]["evaluation"]["lift_deciles"])
     frame = pd.DataFrame({"target": np.asarray(y_true), "prediction": np.asarray(y_pred_prob)})
     frame = frame.sort_values("prediction", ascending=False).reset_index(drop=True)
-    frame["decile"] = np.floor(np.arange(len(frame)) * 10 / len(frame)).astype(int) + 1
+    frame["decile"] = np.floor(np.arange(len(frame)) * deciles / len(frame)).astype(int) + 1
     total_defaults = frame["target"].sum()
     lift = (
         frame.groupby("decile", as_index=False)
@@ -619,7 +628,7 @@ def build_lift_table(y_true, y_pred_prob):
     )
     lift = (
         lift.set_index("decile")
-        .reindex(range(1, 11))
+        .reindex(range(1, deciles + 1))
         .rename_axis("decile")
         .reset_index()
     )
@@ -665,7 +674,7 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_nam
     plt.close()
 
     fpr, tpr, _ = roc_curve(y_true, y_pred_prob)
-    plt.figure(figsize=(6, 5))
+    plt.figure(figsize=tuple(eval_config["roc_curve_figsize"]))
     plt.plot(fpr, tpr)
     plt.plot([0, 1], [0, 1], linestyle="--")
     plt.xlabel("False Positive Rate")
@@ -676,7 +685,7 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_nam
     plt.close()
 
     precision, recall, _ = precision_recall_curve(y_true, y_pred_prob)
-    plt.figure(figsize=(6, 5))
+    plt.figure(figsize=tuple(eval_config["pr_curve_figsize"]))
     plt.plot(recall, precision)
     plt.xlabel("Recall")
     plt.ylabel("Precision")
@@ -685,8 +694,13 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_nam
     plt.savefig(model_artifact_path(models_dir, config, "pr_curve"))
     plt.close()
 
-    prob_true, prob_pred = calibration_curve(y_true, y_pred_prob, n_bins=10, strategy="quantile")
-    plt.figure(figsize=(6, 5))
+    prob_true, prob_pred = calibration_curve(
+        y_true,
+        y_pred_prob,
+        n_bins=int(eval_config["calibration_n_bins"]),
+        strategy=eval_config["calibration_strategy"],
+    )
+    plt.figure(figsize=tuple(eval_config["calibration_curve_figsize"]))
     plt.plot(prob_pred, prob_true, marker="o")
     plt.plot([0, 1], [0, 1], linestyle="--")
     plt.xlabel("Mean Predicted Probability")
@@ -696,7 +710,7 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_nam
     plt.savefig(model_artifact_path(models_dir, config, "calibration_curve"))
     plt.close()
 
-    plt.figure(figsize=(7, 5))
+    plt.figure(figsize=tuple(eval_config["lift_chart_figsize"]))
     plt.bar(lift_table["decile"], lift_table["default_rate"])
     plt.xlabel("Risk Decile (1 = highest risk)")
     plt.ylabel("Default Rate")
@@ -763,7 +777,7 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     threshold_info, threshold_table = choose_threshold(y_true, y_pred_prob, config, evaluation_scope)
     threshold = threshold_info["threshold"]
     y_pred_bin = (y_pred_prob > threshold).astype(int)
-    lift_table = build_lift_table(y_true, y_pred_prob)
+    lift_table = build_lift_table(y_true, y_pred_prob, config)
     metrics = {
         "model": model_name,
         "evaluation_scope": evaluation_scope,
