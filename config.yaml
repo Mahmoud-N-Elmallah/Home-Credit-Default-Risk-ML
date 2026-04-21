@@ -69,7 +69,7 @@ data:
 
 pipeline:
   high_null_threshold: 0.6
-  correlation_threshold: 0.95
+  correlation_threshold: 0.99
   variance_threshold: 0.995
   warn_on_stale_submission: true
   fill_values:
@@ -80,7 +80,7 @@ pipeline:
     binary_strategy: "ordinal"
     binary_values: [ 0, 1 ]
     unknown_value: -1
-    one_hot_drop_first: true
+    one_hot_drop_first: false
     null_category_label: "__NULL__"
     frequency_unknown_value: 1
     frequency_normalize: false

@@ -1116,14 +1116,17 @@ def run_single_search(X, y, ids, config, models_dir, seed, est_config):
     subsample_rate = t_config["optuna_subsample_rate"]
 
     print(f"Search phase: {name}, {t_config['optuna_n_trials']} trials, {subsample_rate * 100:.1f}% data.")
-    X_search, _, y_search, _, ids_search, _ = train_test_split(
-        X,
-        y,
-        ids,
-        train_size=subsample_rate,
-        stratify=y,
-        random_state=seed,
-    )
+    if subsample_rate >= 1.0:
+        X_search, y_search, ids_search = X, y, ids
+    else:
+        X_search, _, y_search, _, ids_search, _ = train_test_split(
+            X,
+            y,
+            ids,
+            train_size=subsample_rate,
+            stratify=y,
+            random_state=seed,
+        )
     feature_selection_enabled = t_config["preprocessing"]["feature_selection"]["enabled_during_search"]
 
     def objective(trial):
