@@ -307,7 +307,7 @@ def save_metadata(
 def run_shap_analysis(config_path, experiment_dir_arg=None, sample_size_arg=None, top_n_arg=None):
     config = load_yaml(config_path)
     shap_settings = shap_config(config)
-    experiment_dir = resolve_path(experiment_dir_arg or shap_settings["default_experiment_dir"])
+    experiment_dir = resolve_path(experiment_dir_arg or config["artifacts"]["best_experiment_dir"])
     sample_size = int(sample_size_arg if sample_size_arg is not None else shap_settings["sample_size"])
     top_n = int(top_n_arg if top_n_arg is not None else shap_settings["top_n"])
 

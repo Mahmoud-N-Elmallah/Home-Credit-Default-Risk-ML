@@ -251,9 +251,11 @@ pipeline:
       receivable_principal_col: "AMT_RECEIVABLE_PRINCIPAL"
       drawings_count_col: "CNT_DRAWINGS_CURRENT"
 
+artifacts:
+  best_experiment_dir: "Models/20260420_174015_balanced_catboost"
+
 analysis:
   shap:
-    default_experiment_dir: "Models/20260420_174015_balanced_catboost"
     sample_size: 5000
     top_n: 30
     dependence_plot_count: 3
@@ -309,6 +311,19 @@ baseline:
     confusion_matrix: "confusion_matrix.png"
     feature_importance: "feature_importance.csv"
     feature_importance_plot: "feature_importance_top.png"
+
+inference:
+  input_path:
+  output_path: "inference/predictions.csv"
+  probability_col: "TARGET_PROBABILITY"
+  label_col: "TARGET_PREDICTION"
+  include_binary_label: true
+  threshold_source: "artifact"
+  default_threshold: 0.5
+  allow_target_column: false
+  missing_feature_strategy: "fill"
+  missing_feature_fill_value: 0
+  max_missing_features_to_fill: 20
 
 training:
   target_col: "TARGET"

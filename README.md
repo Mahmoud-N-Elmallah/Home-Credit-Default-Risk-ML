@@ -125,6 +125,30 @@ Important: if you change preprocessing options in `config.yaml`, run
 `--process` before `--train`. Running only `--train` will reuse whatever
 already exists in `Data/final/`.
 
+## Inference
+
+Use the saved best model to score already processed pipeline features:
+
+```powershell
+.\.venv\Scripts\python.exe src\inference.py --input Data\final\final_test.csv
+```
+
+By default, the script loads the experiment configured at
+`artifacts.best_experiment_dir`, applies the saved `training_preprocessor.pkl`,
+and writes predictions under that experiment folder using
+`inference.output_path`.
+
+Custom output path:
+
+```powershell
+.\.venv\Scripts\python.exe src\inference.py --input Data\final\final_test.csv --output inference\predictions.csv
+```
+
+The inference input must use the processed feature schema, like
+`Data/final/final_test.csv`. Raw application rows alone are not enough because
+the trained model uses engineered bureau, previous-application, POS,
+installment, and credit-card aggregate features.
+
 ## Run Profiles
 
 Set `training.run_mode` in `config.yaml`.
@@ -200,9 +224,13 @@ Most project behavior is controlled from `config.yaml`.
 - `data.csv`: CSV parser options, null tokens, and schema overrides.
 - `data.raw`: raw Kaggle input file paths.
 - `data.final`: processed train/test/manifest output paths.
+- `artifacts`: shared paths for stable saved artifacts such as the best
+  experiment folder.
 - `pipeline`: preprocessing thresholds, fill values, categorical encoding,
   anomaly cleanup, feature-engineering sets, aggregation specs, recency windows,
   and last-N windows.
+- `inference`: inference input/output defaults, prediction column names,
+  threshold source, and missing-feature handling.
 - `training.run_profiles`: runtime/quality profiles.
 - `training.phases`: explicit `search`, `validate`, and `final_fit` switches.
 - `training.experiment`: experiment folder naming.
@@ -416,6 +444,26 @@ Tunes, validates, fits, reports, and submits the configured model.
 - `run_single_search`: runs Optuna search and search-CV evaluation.
   - `objective`: nested Optuna objective used during primary-model search.
 - `predict_test_and_submit`: transforms test data and writes Kaggle probabilities.
+
+### `src/inference.py`
+
+Loads the saved best experiment and scores processed feature rows.
+
+- `parse_args`: parses config, experiment, input, JSON, output, and threshold
+  overrides.
+- `resolve_path`: resolves project-relative paths.
+- `load_yaml`: loads YAML config/artifacts.
+- `experiment_path`: resolves the configured or overridden experiment folder.
+- `output_path`: resolves the configured or overridden prediction CSV path.
+- `load_input_frame`: loads either CSV input or JSON row/list input.
+- `expected_preprocessor_input_columns`: reads the saved preprocessor's expected
+  input schema.
+- `prepare_features`: drops ID/target columns, aligns features, and applies the
+  configured missing-feature policy.
+- `load_threshold`: reads the saved threshold artifact or configured fallback.
+- `run_inference`: loads model/preprocessor artifacts, transforms rows, scores
+  probabilities, optionally adds labels, and writes predictions.
+- `main`: CLI entrypoint.
 
 ## Final Submission Notes
 
