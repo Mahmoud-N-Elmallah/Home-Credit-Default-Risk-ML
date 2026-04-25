@@ -314,152 +314,55 @@ CLI entrypoint.
   `--all`, and `--config` flags, converts config to a plain dict, then calls
   the processing and/or training pipeline.
 
-### `src/data_processing/run_pipeline.py`
+### Source Layout
+
+Source code is grouped by functional area so pipeline changes stay localized.
+
+```text
+src/
+  common/           shared artifact, config, and schema helpers
+  data_processing/  raw CSV loading, encoding, aggregations, feature cleanup
+  model_training/   training config, artifacts, preprocessing, models, search, evaluation
+  inference/        reusable batch scoring core and CLI parser
+  analysis/         SHAP analysis workflow
+```
+
+### `src/data_processing/`
 
 Builds final train/test feature matrices.
 
-- `_polars_dtype`: converts dtype names from config to Polars dtypes.
-- `_csv_options`: builds Polars CSV reader options from config.
-- `_safe_ratio_expr`: creates division expressions with configured epsilon.
-- `_feature_enabled`: checks whether a feature set is enabled.
-- `_available_lazy_columns`: lists columns in a lazy Polars frame.
-- `_existing_columns`: filters requested columns to available columns.
-- `_mean_agg_exprs`: builds mean aggregation expressions.
-- `_sum_agg_exprs`: builds sum aggregation expressions.
-- `_max_agg_exprs`: builds max aggregation expressions.
-- `_last_n_filter`: keeps the most recent N records per customer/group.
-- `_trend_expr`: creates recent-minus-global trend features.
-- `load_data`: loads base train/test tables and lazy auxiliary tables.
-- `get_proportions`: creates category proportion aggregations.
-- `_sorted_unique_values`: gets sorted categorical values and optional null
-  label.
-- `_categorical_expr`: creates one-hot indicator expressions.
-- `_binary_expr`: creates ordinal binary categorical encoding.
-- `encode_categoricals`: encodes string categoricals using train-discovered
-  categories.
-- `apply_frequency_encoding`: replaces configured high-cardinality categoricals
-  with train frequency counts.
-- `preprocess_base`: fixes application anomalies, adds application-level ratios,
-  document count, missing indicators, and categorical encodings.
-  - `transform_base`: nested helper that applies those base-table transforms to
-    either train or test.
-- `agg_bureau`: aggregates bureau and bureau balance history, including
-  active/closed splits and recency-window features.
-- `agg_prev_app`: aggregates previous applications, interest-like ratios,
-  status splits, and last-N features.
-- `agg_pos_cash`: cleans configured POS invalid values and aggregates POS
-  history, recency, last-N, and trend features.
-- `agg_installments`: builds payment timing/ratio features and aggregates
-  installment history.
-- `agg_cc_balance`: builds credit-card utilization/receivable features and
-  aggregates card history.
-- `merge_all`: left-joins all auxiliary aggregations onto application rows and
-  warns about high-null auxiliary columns.
-- `impute_missing`: fills auxiliary nulls, median-fills base numeric nulls, and
-  adds missing indicators.
-- `add_global_features`: adds final global ratios, EXT_SOURCE summaries,
-  enquiry totals, and cleans generated numeric NaN/inf values.
-- `feature_cleanup`: drops correlated and low-variance features, aligns test to
-  train columns, and records dropped columns.
-- `validate`: checks target placement, null-free matrices, unique IDs, and
-  train/test column alignment.
-- `write_feature_manifest`: writes processing metadata and final column lists.
-- `latest_submission_path`: resolves the latest known submission path for stale
-  submission warnings.
-- `run_pipeline`: orchestrates the full processing stage and writes final CSVs.
+- `run_pipeline.py`: orchestration only; loads raw tables, runs feature stages, writes final CSVs.
+- `io.py`: Polars CSV options, raw table loading, manifest writing, stale-submission lookup.
+- `encoding.py`: categorical and frequency encoding.
+- `aggregations.py`: bureau, previous-application, POS, installments, and credit-card aggregations.
+- `features.py`: base preprocessing, merges, missing-value handling, global features, cleanup, validation.
 
-### `src/model_training/run_training.py`
+### `src/model_training/`
 
 Tunes, validates, fits, reports, and submits the configured model.
 
-- `resolve_training_config`: applies the selected run profile into active
-  training settings.
-- `stable_yaml_hash`: hashes config content in stable YAML form.
-- `file_hash`: hashes data files for artifact metadata.
-- `slugify`: makes safe experiment folder names.
-- `primary_model_name`: reads the configured primary model name.
-- `get_primary_estimator_config`: returns the primary model config.
-- `get_estimator_config_by_name`: finds a candidate model by name.
-- `create_experiment_dir`: creates `Models/<experiment_id>/` with collision
-  handling.
-- `write_latest_experiment_pointer`: writes `Models/latest_experiment.txt`.
-- `save_config_snapshot`: saves the effective config inside the experiment.
-- `metadata_path`: resolves the run metadata path.
-- `build_run_metadata`: builds config/data/run metadata.
-- `write_run_metadata`: writes metadata and artifact list.
-- `validate_reusable_artifacts`: prevents stale artifact reuse unless allowed.
-- `clean_column_names`: sanitizes feature names for model libraries.
-- `get_scaler`: creates the configured scaler.
-- `parse_selector_threshold`: parses selector thresholds from config.
-- `get_acceleration_config`: reads acceleration config for a model.
-- `get_accelerator_order`: orders preferred/fallback accelerator attempts.
-- `get_accelerator_params`: reads model-specific GPU/CPU params.
-- `accelerator_failure_is_retryable`: checks whether an accelerator failure can
-  fall back.
-- `get_imbalance_config`: reads imbalance handling config.
-- `get_imbalance_sampler`: creates an optional sampler, or returns none for
-  class-weight mode.
-- `split_speed_params`: separates training-speed fit options from model params.
-- `merge_model_params`: merges base params, imbalance params, accelerator params,
-  and verbosity.
-- `fit_kwargs_for_model`: creates fold-local eval splits for early stopping.
-- `capability_sample`: creates a tiny stratified sample for accelerator checks.
-- `resolve_model_accelerator`: tests/caches whether GPU or CPU should be used.
-- `fit_model`: fits one model with accelerator retry/fallback.
-- `TrainingPreprocessor`: fold-safe scaler, selector, and optional pruning.
-  - `__init__`: stores config and feature-selection flag.
-  - `fit`: learns scaler, selector, and pruned columns from current train split.
-  - `transform`: applies learned preprocessing and checks expected columns.
-  - `fit_transform`: fits then transforms.
-- `fit_lgbm_selector`: fits LightGBM feature selector.
-- `fit_feature_pruning_columns`: chooses columns from selector importances when
-  pruning is enabled.
-- `calculate_metric`: computes ROC AUC, average precision, or F1.
-- `model_artifact_path`: resolves experiment-relative artifact paths.
-- `model_feature_importances`: extracts native model feature importance.
-- `save_feature_importance`: saves feature-importance CSV and top-N plot.
-- `threshold_grid`: builds the configured threshold grid.
-- `build_threshold_table`: computes precision/recall/F1/accuracy per threshold.
-- `choose_threshold`: selects threshold from OOF/search-CV predictions.
-- `build_lift_table`: builds decile lift/capture diagnostics.
-- `save_oof_predictions`: saves per-row OOF probabilities.
-- `save_diagnostic_plots`: saves confusion matrix, ROC, PR, and lift plots.
-- `save_evaluation_report`: writes metrics, threshold table, OOF predictions,
-  lift table, plots, and text report.
-- `suggest_params`: converts Optuna search-space config into trial suggestions.
-- `merged_estimator_config`: returns a candidate config with param overrides.
-- `get_cv`: creates stratified K-fold CV.
-- `fit_predict_fold`: fits one fold and returns validation probabilities.
-- `cross_validated_single_predictions`: builds complete OOF/search-CV
-  probability predictions.
-- `fit_final_single_model`: fits the final full-train model and saves artifacts.
-- `configure_optuna_logging`: sets Optuna verbosity from config.
-- `run_training`: orchestrates training, metadata, phases, and latest pointer.
-- `run_single_phases`: runs search, validation, and final-fit phases for the
-  primary model.
-- `run_single_search`: runs Optuna search and search-CV evaluation.
-  - `objective`: nested Optuna objective used during primary-model search.
-- `predict_test_and_submit`: transforms test data and writes Kaggle probabilities.
+- `run_training.py`: orchestration and compatibility re-exports for existing imports/artifacts.
+- `config.py`: run-profile resolution and estimator config lookup.
+- `artifacts.py`: experiment folders, config snapshots, hashes, metadata, stale-artifact guards.
+- `preprocessing.py`: `TrainingPreprocessor`, scaling, feature selection, optional pruning.
+- `models.py`: model registry, imbalance handling, accelerator fallback, model fitting.
+- `search.py`: Optuna parameter search, CV predictions, final model fit.
+- `evaluation.py`: metrics, threshold tuning, lift table, reports, plots, feature importance.
 
-### `src/inference.py`
+### `src/inference/` And `src/inference.py`
 
-Loads the saved best experiment and scores processed feature rows.
+Scores processed feature rows using saved experiment artifacts.
 
-- `parse_args`: parses config, experiment, input, JSON, output, and threshold
-  overrides.
-- `resolve_path`: resolves project-relative paths.
-- `load_yaml`: loads YAML config/artifacts.
-- `experiment_path`: resolves the configured or overridden experiment folder.
-- `output_path`: resolves the configured or overridden prediction CSV path.
-- `load_input_frame`: loads either CSV input or JSON row/list input.
-- `expected_preprocessor_input_columns`: reads the saved preprocessor's expected
-  input schema.
-- `prepare_features`: drops ID/target columns, aligns features, and applies the
-  configured missing-feature policy.
-- `load_threshold`: reads the saved threshold artifact or configured fallback.
-- `run_inference`: loads model/preprocessor artifacts, transforms rows, scores
-  probabilities, optionally adds labels, and writes predictions.
-- `main`: CLI entrypoint.
+- `src/inference/core.py`: feature alignment, threshold loading, artifact loading, prediction output creation.
+- `src/inference/cli.py`: CLI argument parsing and command entrypoint.
+- `src/inference.py`: compatibility wrapper so `python src/inference.py ...` still works.
+
+### `src/analysis/` And `src/shap_analysis.py`
+
+Runs SHAP analysis for trained CatBoost experiments.
+
+- `src/analysis/shap.py`: sample loading, SHAP computation, plots, metadata, reports.
+- `src/shap_analysis.py`: compatibility wrapper so `python src/shap_analysis.py ...` still works.
 
 ## Final Submission Notes
 
