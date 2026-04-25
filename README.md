@@ -213,11 +213,9 @@ reports/oof_predictions.csv
 reports/threshold_table.csv
 reports/lift_deciles.csv
 reports/feature_importance.csv
-reports/calibration_diagnostics.yaml
 plots/confusion_matrix.png
 plots/roc_curve.png
 plots/pr_curve.png
-plots/calibration_curve.png
 plots/lift_chart.png
 plots/feature_importance_top.png
 ```
@@ -244,8 +242,6 @@ Most project behavior is controlled from `conf/config.yaml`.
 - `training.phases`: explicit `search`, `validate`, and `final_fit` switches.
 - `training.experiment`: experiment folder naming.
 - `training.threshold_tuning`: OOF/search-CV threshold tuning.
-- `training.model_comparison`: optional single-model comparison reports.
-- `training.calibration`: report-only calibration diagnostics.
 - `training.acceleration`: GPU preference and CPU fallback.
 - `training.preprocessing`: scaling, imbalance strategy, feature selection,
   and optional feature pruning.
@@ -258,8 +254,6 @@ Most project behavior is controlled from `conf/config.yaml`.
   train on that row.
 - **Kaggle submission** uses raw probabilities, not thresholded labels.
 - **Threshold tuning** is for reports/business classification metrics only.
-- **Calibration diagnostics** measure probability quality; they do not alter
-  submission probabilities because `apply_to_submission` is false.
 - **GPU handling** tries the configured accelerator first and falls back to CPU
   for retryable GPU capability failures.
 - **Artifact guards** save config/data hashes in metadata so stale artifact reuse
@@ -429,11 +423,7 @@ Tunes, validates, fits, reports, and submits the configured model.
 - `choose_threshold`: selects threshold from OOF/search-CV predictions.
 - `build_lift_table`: builds decile lift/capture diagnostics.
 - `save_oof_predictions`: saves per-row OOF probabilities.
-- `save_diagnostic_plots`: saves confusion matrix, ROC, PR, calibration, and
-  lift plots.
-- `calibrated_oof_predictions`: creates fold-safe isotonic-calibrated OOF
-  probabilities for diagnostics.
-- `save_calibration_diagnostics`: saves Brier-score calibration comparison.
+- `save_diagnostic_plots`: saves confusion matrix, ROC, PR, and lift plots.
 - `save_evaluation_report`: writes metrics, threshold table, OOF predictions,
   lift table, plots, and text report.
 - `suggest_params`: converts Optuna search-space config into trial suggestions.
@@ -444,14 +434,7 @@ Tunes, validates, fits, reports, and submits the configured model.
   probability predictions.
 - `fit_final_single_model`: fits the final full-train model and saves artifacts.
 - `configure_optuna_logging`: sets Optuna verbosity from config.
-- `comparison_training_config`: creates a temporary config for optional model
-  comparison.
-- `model_comparison_sample`: samples data for model-comparison runs.
-- `compare_one_model`: Optuna-tunes and scores one comparison candidate.
-  - `objective`: nested Optuna objective used during model comparison.
-- `run_model_comparison`: saves optional model comparison CSV/YAML.
-- `run_training`: orchestrates training, metadata, comparison, phases, and latest
-  pointer.
+- `run_training`: orchestrates training, metadata, phases, and latest pointer.
 - `run_single_phases`: runs search, validation, and final-fit phases for the
   primary model.
 - `run_single_search`: runs Optuna search and search-CV evaluation.

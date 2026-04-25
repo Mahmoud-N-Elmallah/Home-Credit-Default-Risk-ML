@@ -387,17 +387,6 @@ training:
     save_curves: true
     save_feature_importance: true
     feature_importance_top_n: 50
-  model_comparison:
-    enabled: false
-    candidates: [ "catboost", "lightgbm" ]
-    max_trials_per_model: 5
-    cv_splits: 3
-    subsample_rate: 0.35
-  calibration:
-    enabled: true
-    method: "isotonic"
-    cv_splits: 3
-    apply_to_submission: false
   acceleration:
     preferred: "gpu"
     fallback: "cpu"
@@ -459,15 +448,11 @@ training:
     oof_predictions: "reports/oof_predictions.csv"
     threshold_table: "reports/threshold_table.csv"
     lift_table: "reports/lift_deciles.csv"
-    model_comparison_csv: "reports/model_comparison.csv"
-    model_comparison_yaml: "reports/model_comparison.yaml"
     feature_importance: "reports/feature_importance.csv"
     feature_importance_plot: "plots/feature_importance_top.png"
-    calibration_diagnostics: "reports/calibration_diagnostics.yaml"
     confusion_matrix: "plots/confusion_matrix.png"
     roc_curve: "plots/roc_curve.png"
     pr_curve: "plots/pr_curve.png"
-    calibration_curve: "plots/calibration_curve.png"
     lift_chart: "plots/lift_chart.png"
 
   evaluation:
@@ -476,10 +461,7 @@ training:
     confusion_matrix_cmap: "Blues"
     roc_curve_figsize: [ 6, 5 ]
     pr_curve_figsize: [ 6, 5 ]
-    calibration_curve_figsize: [ 6, 5 ]
     lift_chart_figsize: [ 7, 5 ]
-    calibration_n_bins: 10
-    calibration_strategy: "quantile"
     lift_deciles: 10
     feature_importance_fig_width: 8
     feature_importance_min_height: 4

@@ -29,8 +29,6 @@ from sklearn.metrics import (
     roc_curve,
     roc_auc_score,
 )
-from sklearn.calibration import calibration_curve
-from sklearn.isotonic import IsotonicRegression
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 from tqdm import tqdm
@@ -694,22 +692,6 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_nam
     plt.savefig(model_artifact_path(models_dir, config, "pr_curve"))
     plt.close()
 
-    prob_true, prob_pred = calibration_curve(
-        y_true,
-        y_pred_prob,
-        n_bins=int(eval_config["calibration_n_bins"]),
-        strategy=eval_config["calibration_strategy"],
-    )
-    plt.figure(figsize=tuple(eval_config["calibration_curve_figsize"]))
-    plt.plot(prob_pred, prob_true, marker="o")
-    plt.plot([0, 1], [0, 1], linestyle="--")
-    plt.xlabel("Mean Predicted Probability")
-    plt.ylabel("Observed Default Rate")
-    plt.title(f"Calibration Curve: {model_name}")
-    plt.tight_layout()
-    plt.savefig(model_artifact_path(models_dir, config, "calibration_curve"))
-    plt.close()
-
     plt.figure(figsize=tuple(eval_config["lift_chart_figsize"]))
     plt.bar(lift_table["decile"], lift_table["default_rate"])
     plt.xlabel("Risk Decile (1 = highest risk)")
@@ -718,53 +700,6 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_nam
     plt.tight_layout()
     plt.savefig(model_artifact_path(models_dir, config, "lift_chart"))
     plt.close()
-
-
-def calibrated_oof_predictions(y_true, y_pred_prob, config):
-    calibration_config = config["training"]["calibration"]
-    method = calibration_config["method"]
-    if method != "isotonic":
-        raise ValueError(f"Unknown calibration.method: {method}")
-
-    y_array = np.asarray(y_true)
-    pred_array = np.asarray(y_pred_prob)
-    min_class_count = int(pd.Series(y_array).value_counts().min())
-    n_splits = min(int(calibration_config["cv_splits"]), min_class_count)
-    if n_splits < 2:
-        raise ValueError("Calibration diagnostics require at least two positive and negative samples.")
-
-    calibrated = np.full(len(pred_array), np.nan)
-    cv = StratifiedKFold(
-        n_splits=n_splits,
-        shuffle=config["training"]["cv_shuffle"],
-        random_state=config["globals"]["random_state"],
-    )
-    for train_idx, valid_idx in cv.split(pred_array.reshape(-1, 1), y_array):
-        calibrator = IsotonicRegression(out_of_bounds="clip")
-        calibrator.fit(pred_array[train_idx], y_array[train_idx])
-        calibrated[valid_idx] = calibrator.predict(pred_array[valid_idx])
-
-    if np.isnan(calibrated).any():
-        raise ValueError("Calibration diagnostics incomplete; at least one row was not calibrated.")
-    return np.clip(calibrated, 0.0, 1.0)
-
-
-def save_calibration_diagnostics(y_true, y_pred_prob, models_dir, config):
-    if not config["training"]["calibration"]["enabled"]:
-        return None
-
-    calibrated = calibrated_oof_predictions(y_true, y_pred_prob, config)
-    diagnostics = {
-        "method": config["training"]["calibration"]["method"],
-        "cv_splits": config["training"]["calibration"]["cv_splits"],
-        "scope": "out_of_fold_probability_calibration",
-        "uncalibrated_brier_score": float(brier_score_loss(y_true, y_pred_prob)),
-        "calibrated_brier_score": float(brier_score_loss(y_true, calibrated)),
-        "apply_to_submission": config["training"]["calibration"]["apply_to_submission"],
-    }
-    with open(model_artifact_path(models_dir, config, "calibration_diagnostics"), "w", encoding="utf-8") as file:
-        yaml.safe_dump(diagnostics, file, sort_keys=False)
-    return diagnostics
 
 
 def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, evaluation_scope, ids=None):
@@ -795,12 +730,6 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
             "accuracy": float(accuracy_score(y_true, y_pred_bin)),
         },
     }
-    calibration_diagnostics = None
-    if evaluation_scope == "out_of_fold":
-        calibration_diagnostics = save_calibration_diagnostics(y_true, y_pred_prob, models_dir, config)
-        if calibration_diagnostics is not None:
-            metrics["calibration"] = calibration_diagnostics
-
     report_str = f"Model: {model_name}\n"
     report_str += "=" * 40 + "\n"
     report_str += f"Evaluation Scope: {evaluation_scope}\n"
@@ -811,8 +740,6 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     report_str += f"ROC AUC Score: {metrics['ranking']['roc_auc']:.4f}\n"
     report_str += f"Average Precision (PR AUC): {metrics['ranking']['average_precision']:.4f}\n"
     report_str += f"Brier Score: {metrics['ranking']['brier_score']:.4f}\n"
-    if calibration_diagnostics is not None:
-        report_str += f"Calibrated Brier Score: {calibration_diagnostics['calibrated_brier_score']:.4f}\n"
     report_str += f"Precision: {metrics['threshold_metrics']['precision']:.4f}\n"
     report_str += f"Recall: {metrics['threshold_metrics']['recall']:.4f}\n"
     report_str += f"F1 Score: {metrics['threshold_metrics']['f1']:.4f}\n"
@@ -943,110 +870,6 @@ def configure_optuna_logging(config):
     optuna.logging.set_verbosity(levels.get(level_name, optuna.logging.INFO))
 
 
-def comparison_training_config(config):
-    comparison_config = config["training"]["model_comparison"]
-    resolved = deepcopy(config)
-    resolved["training"]["cv_splits"] = comparison_config["cv_splits"]
-    resolved["training"]["optuna_n_trials"] = comparison_config["max_trials_per_model"]
-    resolved["training"]["optuna_subsample_rate"] = comparison_config["subsample_rate"]
-    return resolved
-
-
-def model_comparison_sample(X, y, ids, config):
-    comparison_config = config["training"]["model_comparison"]
-    subsample_rate = comparison_config["subsample_rate"]
-    if subsample_rate >= 1.0:
-        return X, y, ids
-    X_sample, _, y_sample, _, ids_sample, _ = train_test_split(
-        X,
-        y,
-        ids,
-        train_size=subsample_rate,
-        stratify=y,
-        random_state=config["globals"]["random_state"],
-    )
-    return X_sample, y_sample, ids_sample
-
-
-def compare_one_model(X, y, config, est_config, seed):
-    t_config = config["training"]
-    name = est_config["name"]
-    search_space = est_config.get("search_space", {})
-    feature_selection_enabled = t_config["preprocessing"]["feature_selection"]["enabled_during_search"]
-
-    def objective(trial):
-        trial_params = suggest_params(trial, search_space)
-        model_params = {key.replace("model__", ""): value for key, value in trial_params.items()}
-        candidate_config = merged_estimator_config(est_config, model_params)
-        preds = cross_validated_single_predictions(
-            X,
-            y,
-            candidate_config,
-            config,
-            desc=f"{name} Compare CV",
-            is_trial=True,
-            feature_selection_enabled=feature_selection_enabled,
-        )
-        return calculate_metric(y, preds, t_config["optimization_metric"], t_config["classification_threshold"])
-
-    study = optuna.create_study(
-        direction=t_config["optuna_direction"],
-        sampler=optuna.samplers.TPESampler(seed=seed),
-    )
-    study.optimize(objective, n_trials=t_config["optuna_n_trials"], show_progress_bar=True)
-    best_params = {key.replace("model__", ""): value for key, value in study.best_params.items()}
-    best_config = merged_estimator_config(est_config, best_params)
-    preds = cross_validated_single_predictions(
-        X,
-        y,
-        best_config,
-        config,
-        desc=f"{name} Compare Best CV",
-        is_trial=True,
-        feature_selection_enabled=feature_selection_enabled,
-    )
-    return {
-        "model": name,
-        "evaluation_scope": "search_subsample_cv",
-        "metric_name": t_config["optimization_metric"],
-        "metric_value": float(calculate_metric(y, preds, t_config["optimization_metric"], t_config["classification_threshold"])),
-        "roc_auc": float(roc_auc_score(y, preds)),
-        "average_precision": float(average_precision_score(y, preds)),
-        "brier_score": float(brier_score_loss(y, preds)),
-        "trials": int(t_config["optuna_n_trials"]),
-        "cv_splits": int(t_config["cv_splits"]),
-        "subsample_rate": float(t_config["optuna_subsample_rate"]),
-        "best_params": best_params,
-    }
-
-
-def run_model_comparison(X, y, ids, config, models_dir, seed, metadata):
-    comparison_config = config["training"]["model_comparison"]
-    if not comparison_config["enabled"]:
-        return
-
-    compare_config = comparison_training_config(config)
-    X_compare, y_compare, _ = model_comparison_sample(X, y, ids, compare_config)
-    rows = []
-    for model_name in comparison_config["candidates"]:
-        est_config = get_estimator_config_by_name(compare_config, model_name)
-        rows.append(compare_one_model(X_compare, y_compare, compare_config, est_config, seed))
-
-    csv_rows = [{key: value for key, value in row.items() if key != "best_params"} for row in rows]
-    pd.DataFrame(csv_rows).sort_values("metric_value", ascending=False).to_csv(
-        model_artifact_path(models_dir, config, "model_comparison_csv"),
-        index=False,
-    )
-    payload = {
-        "evaluation_scope": "search_subsample_cv",
-        "metric_name": config["training"]["optimization_metric"],
-        "rows": rows,
-    }
-    with open(model_artifact_path(models_dir, config, "model_comparison_yaml"), "w", encoding="utf-8") as file:
-        yaml.safe_dump(payload, file, sort_keys=False)
-    metadata["model_comparison"] = payload
-
-
 def run_training(config):
     config = resolve_training_config(config)
     print(f"Initializing training pipeline ({config['training']['run_mode']})...")
@@ -1073,7 +896,6 @@ def run_training(config):
     metadata = build_run_metadata(config, X, y, train_path, experiment_id, timestamp)
     validate_reusable_artifacts(models_dir, config, metadata)
 
-    run_model_comparison(X, y, train_ids, config, models_dir, seed, metadata)
     run_single_phases(X, y, train_ids, config, models_dir, seed, metadata)
 
     metadata["selected_accelerators"].update(
@@ -1191,9 +1013,6 @@ def run_single_search(X, y, ids, config, models_dir, seed, est_config):
 
 def predict_test_and_submit(model_obj, config, models_dir, preprocessor=None):
     print("Generating predictions...")
-    if config["training"]["calibration"].get("apply_to_submission", False):
-        raise ValueError("calibration.apply_to_submission is not supported in this diagnostics-only iteration.")
-
     test_path = Path(config["data"]["final"]["test"])
     if not test_path.exists():
         raise FileNotFoundError(f"Test data not found at {test_path}. Run --process first.")

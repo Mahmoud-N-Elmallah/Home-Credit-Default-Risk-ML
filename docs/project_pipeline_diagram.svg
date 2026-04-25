@@ -87,7 +87,7 @@
     <text class="title" x="95" y="30" text-anchor="middle">Reports</text>
     <line class="line" x1="0" y1="50" x2="190" y2="50"/>
     <text class="small" x="14" y="76">- ROC / PR / lift</text>
-    <text class="small" x="14" y="98">- calibration curve</text>
+    <text class="small" x="14" y="98">- confusion matrix</text>
     <text class="small" x="14" y="120">- feature importance</text>
   </g>
 
