@@ -1,11 +1,11 @@
 # Home Credit Default Risk ML
 
-Leakage-safe machine-learning pipeline for the Kaggle [**Home Credit Default Risk**] (https://www.kaggle.com/c/home-credit-default-risk) 
+Leakage-safe machine-learning pipeline for the Kaggle [**Home Credit Default Risk**](https://www.kaggle.com/c/home-credit-default-risk)
 competition. The project builds customer-level features from the raw Home Credit
 tables, trains one configured primary model, evaluates it with out-of-fold
 validation and produces a submission csv.
 
-Best project result: **0.79074 public leaderboard ROC AUC**from
+Best project result: **0.79074 public leaderboard ROC AUC** from
 `Models/20260420_174015_balanced_catboost`.
 
 ## Project Pipeline
