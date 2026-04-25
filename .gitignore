@@ -16,7 +16,7 @@ Models/baseline/*
 !Models/baseline/confusion_matrix.png
 !Models/baseline/feature_importance_top.png
 !Models/baseline/roc_curve.png
-!Models/hydra_runs
+Models/hydra_runs/
 Data/
 .env
 catboost_info/
@@ -24,6 +24,11 @@ Notebooks/*
 !Notebooks/Baseline Model.ipynb
 .gemini/
 compressed.md
+.hydra/
+outputs/
+multirun/
+.vscode/
+.idea/
 
 
 # C extensions
