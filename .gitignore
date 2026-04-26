@@ -22,6 +22,9 @@ Data/*
 !Data/.gitignore
 .env
 catboost_info/
+**/catboost_info/
+mlruns/
+mlartifacts/
 Notebooks/*
 !Notebooks/Baseline Model.ipynb
 .gemini/
