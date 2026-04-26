@@ -10,7 +10,7 @@ from src.inference import (  # noqa: E402,F401
     expected_preprocessor_input_columns,
     load_input_frame,
     load_threshold,
-    load_yaml,
+    load_hydra_config,
     main,
     output_path,
     parse_args,

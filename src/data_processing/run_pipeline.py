@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 
 from src.data_processing.aggregations import (
     agg_bureau,
@@ -16,6 +17,9 @@ from src.data_processing.features import (
     validate,
 )
 from src.data_processing.io import latest_submission_path, load_data, write_feature_manifest
+
+
+logger = logging.getLogger(__name__)
 
 
 def run_pipeline(config):
@@ -46,5 +50,5 @@ def run_pipeline(config):
     test_full.write_csv(final_paths["test"])
     submission_path = latest_submission_path(config)
     if config["pipeline"]["warn_on_stale_submission"] and submission_path is not None and submission_path.exists():
-        print(f"Warning: existing submission may be stale after processing. Regenerate it with --train: {submission_path}")
-    print("Data processing done.")
+        logger.warning("Existing submission may be stale after processing. Regenerate it with run.step=train: %s", submission_path)
+    logger.info("Data processing done.")

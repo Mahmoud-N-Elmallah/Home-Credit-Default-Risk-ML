@@ -138,7 +138,7 @@ def capability_sample(X, y, config):
 
 
 def resolve_model_accelerator(name, params, config, X, y, is_trial):
-    cache_key = (name, config["training"]["run_mode"])
+    cache_key = name
     if cache_key in ACCELERATOR_CACHE:
         return ACCELERATOR_CACHE[cache_key]
 

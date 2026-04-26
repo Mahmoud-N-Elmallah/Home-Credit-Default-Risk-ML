@@ -1,4 +1,11 @@
+import logging
+
 import polars as pl
+
+from src.data_processing.constants import FREQUENCY_ENCODING_COLS
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_proportions(df: pl.LazyFrame, target_col: str, prefix: str):
@@ -93,17 +100,16 @@ def encode_categoricals(train: pl.DataFrame, test: pl.DataFrame, config):
         train = train.drop(col)
         test = test.drop(col, strict=False)
 
-    print(f"  Encoded {binary_cols} binary categorical columns and created {dummy_cols} dummy columns.")
+    logger.info("Encoded %s binary categorical columns and created %s dummy columns.", binary_cols, dummy_cols)
     return train, test
 
 
 def apply_frequency_encoding(train: pl.DataFrame, test: pl.DataFrame, config):
-    fe_config = config["pipeline"]["feature_engineering"]
     cat_config = config["pipeline"]["categorical_encoding"]
     fill_value = cat_config["frequency_unknown_value"]
     normalize = cat_config["frequency_normalize"]
 
-    for col in fe_config["frequency_encoding_cols"]:
+    for col in FREQUENCY_ENCODING_COLS:
         if col not in train.columns:
             continue
 

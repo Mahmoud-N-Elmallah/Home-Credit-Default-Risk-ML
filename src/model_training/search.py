@@ -1,4 +1,5 @@
 from copy import deepcopy
+import logging
 
 import joblib
 import numpy as np
@@ -11,6 +12,9 @@ from src.common.artifacts import model_artifact_path
 from src.model_training.evaluation import calculate_metric, save_evaluation_report, save_feature_importance
 from src.model_training.models import fit_model, get_imbalance_sampler
 from src.model_training.preprocessing import TrainingPreprocessor
+
+
+logger = logging.getLogger(__name__)
 
 
 def suggest_params(trial, search_space):
@@ -114,7 +118,7 @@ def run_single_search(X, y, ids, config, models_dir, seed, est_config):
     search_space = est_config.get("search_space", {})
     subsample_rate = t_config["optuna_subsample_rate"]
 
-    print(f"Search phase: {name}, {t_config['optuna_n_trials']} trials, {subsample_rate * 100:.1f}% data.")
+    logger.info("Search phase: %s, %s trials, %.1f%% data.", name, t_config["optuna_n_trials"], subsample_rate * 100)
     if subsample_rate >= 1.0:
         X_search, y_search, ids_search = X, y, ids
     else:

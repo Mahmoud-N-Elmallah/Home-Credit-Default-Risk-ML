@@ -36,7 +36,6 @@ def create_experiment_dir(models_root, config):
     else:
         experiment_id = exp_config["folder_template"].format(
             timestamp=timestamp,
-            run_mode=t_config["run_mode"],
             primary_model=primary_model_name(config),
         )
         experiment_id = slugify(experiment_id)
@@ -85,7 +84,6 @@ def build_run_metadata(config, X, y, train_path, experiment_id, timestamp):
         "timestamp": timestamp,
         "config_hash": stable_yaml_hash(config),
         "data_hashes": {str(train_path): file_hash(train_path)},
-        "run_mode": config["training"]["run_mode"],
         "primary_model": primary_model_name(config),
         "phases": phases,
         "cv_splits": config["training"]["cv_splits"],

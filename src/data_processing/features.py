@@ -1,7 +1,27 @@
+import logging
+
 import numpy as np
 import polars as pl
 
+from src.data_processing.constants import (
+    AGGREGATION_PREFIXES,
+    APPLICATION_SOURCE_COLS,
+    BASE_RATIO_FEATURES,
+    DAY_UNIT,
+    DAYS_EMPLOYED_COL,
+    DOCUMENT_FLAG_PREFIX,
+    ENQUIRY_COLS,
+    EXTENDED_RATIO_FEATURES,
+    EXT_SOURCES,
+    EXT_SOURCE_INTERACTION_BASES,
+    GLOBAL_RATIO_FEATURES,
+    MISSING_INDICATOR_COLS,
+    OUTPUT_FEATURES,
+)
 from src.data_processing.encoding import apply_frequency_encoding, encode_categoricals
+
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_ratio_expr(numerator, denominator, output_name, eps):
@@ -51,17 +71,13 @@ def _trend_expr(recent_col, global_col, output_col):
 
 def preprocess_base(train: pl.DataFrame, test: pl.DataFrame, config):
     """Step 2 - Preprocess base application tables."""
-    print("Preprocessing base tables...")
-    fe_config = config["pipeline"]["feature_engineering"]
-    output_features = fe_config["output_features"]
-    app_cols = fe_config["application_source_cols"]
-    days_birth_col = app_cols["days_birth"]
-    goods_price_col = app_cols["amt_goods_price"]
-    credit_col = app_cols["amt_credit"]
-    days_employed_col = config["pipeline"]["anomaly_fix"]["days_employed_col"]
+    logger.info("Preprocessing base tables...")
+    days_birth_col = APPLICATION_SOURCE_COLS["days_birth"]
+    goods_price_col = APPLICATION_SOURCE_COLS["amt_goods_price"]
+    credit_col = APPLICATION_SOURCE_COLS["amt_credit"]
+    days_employed_col = DAYS_EMPLOYED_COL
     anomaly_val = config["pipeline"]["anomaly_fix"]["days_employed"]
     eps = float(config["globals"]["division_epsilon"])
-    day_unit = float(fe_config["day_unit"])
 
     def transform_base(df: pl.DataFrame):
         if days_employed_col in df.columns:
@@ -76,8 +92,8 @@ def preprocess_base(train: pl.DataFrame, test: pl.DataFrame, config):
         if _feature_enabled(config, "application_extended"):
             if days_birth_col in df.columns:
                 app_exprs.append(
-                    (pl.col(days_birth_col).cast(pl.Float64).abs() / pl.lit(day_unit))
-                    .alias(output_features["age_years"])
+                    (pl.col(days_birth_col).cast(pl.Float64).abs() / pl.lit(DAY_UNIT))
+                    .alias(OUTPUT_FEATURES["age_years"])
                 )
             down_payment_cols = [goods_price_col, credit_col]
             if all(col in df.columns for col in down_payment_cols):
@@ -86,20 +102,20 @@ def preprocess_base(train: pl.DataFrame, test: pl.DataFrame, config):
                         (
                             pl.col(goods_price_col).cast(pl.Float64)
                             - pl.col(credit_col).cast(pl.Float64)
-                        ).alias(output_features["down_payment"]),
+                        ).alias(OUTPUT_FEATURES["down_payment"]),
                         (
                             (
                                 pl.col(goods_price_col).cast(pl.Float64)
                                 - pl.col(credit_col).cast(pl.Float64)
                             )
                             / (pl.col(credit_col).cast(pl.Float64) + pl.lit(eps))
-                        ).alias(output_features["down_payment_ratio"]),
+                        ).alias(OUTPUT_FEATURES["down_payment_ratio"]),
                     ]
                 )
             app_exprs.extend(
                 [
                     _safe_ratio_expr(feature["numerator"], feature["denominator"], feature["name"], eps)
-                    for feature in fe_config["extended_ratio_features"]
+                    for feature in EXTENDED_RATIO_FEATURES
                     if all(col in df.columns for col in [feature["numerator"], feature["denominator"]])
                 ]
             )
@@ -107,7 +123,7 @@ def preprocess_base(train: pl.DataFrame, test: pl.DataFrame, config):
             app_exprs.extend(
                 [
                     pl.col(col).is_null().cast(pl.Int8).alias(f"{col}_is_missing")
-                    for col in fe_config["missing_indicator_cols"]
+                    for col in MISSING_INDICATOR_COLS
                     if col in df.columns and f"{col}_is_missing" not in df.columns
                 ]
             )
@@ -116,16 +132,15 @@ def preprocess_base(train: pl.DataFrame, test: pl.DataFrame, config):
 
         ratio_exprs = [
             _safe_ratio_expr(feature["numerator"], feature["denominator"], feature["name"], eps)
-            for feature in fe_config["base_ratio_features"]
+            for feature in BASE_RATIO_FEATURES
             if all(col in df.columns for col in [feature["numerator"], feature["denominator"]])
         ]
         if ratio_exprs:
             df = df.with_columns(ratio_exprs)
 
-        doc_prefix = fe_config["document_flag_prefix"]
-        doc_cols = [col for col in df.columns if col.startswith(doc_prefix)]
+        doc_cols = [col for col in df.columns if col.startswith(DOCUMENT_FLAG_PREFIX)]
         if doc_cols:
-            df = df.with_columns(pl.sum_horizontal(doc_cols).alias(output_features["document_count"]))
+            df = df.with_columns(pl.sum_horizontal(doc_cols).alias(OUTPUT_FEATURES["document_count"]))
 
         return df
 
@@ -138,14 +153,14 @@ def preprocess_base(train: pl.DataFrame, test: pl.DataFrame, config):
 
 def merge_all(base: pl.DataFrame, aggs: dict, config, name=""):
     """Step 4 - Sequential merge."""
-    print(f"Merging tables for {name}...")
+    logger.info("Merging tables for %s...", name)
     id_curr = config["training"]["id_col"]
     df = base.lazy()
     for _, agg_df in aggs.items():
         df = df.join(agg_df, on=id_curr, how="left")
 
     df = df.collect()
-    print(f"  Shape after all merges: {df.shape}")
+    logger.info("Shape after all merges: %s", df.shape)
     high_null_threshold = config["pipeline"]["high_null_threshold"]
     null_rates = [df.get_column(col).null_count() / df.height for col in df.columns]
     high_nulls = [
@@ -153,19 +168,15 @@ def merge_all(base: pl.DataFrame, aggs: dict, config, name=""):
         if rate > high_null_threshold and col not in base.columns
     ]
     if high_nulls:
-        print(f"  Warning: {len(high_nulls)} columns with high null rate (>{high_null_threshold}).")
+        logger.warning("%s columns with high null rate (>%s).", len(high_nulls), high_null_threshold)
     return df
 
 
 def impute_missing(train: pl.DataFrame, test: pl.DataFrame, config):
     """Step 5 - Missing value imputation."""
-    print("Imputing missing values...")
+    logger.info("Imputing missing values...")
     fill_values = config["pipeline"]["fill_values"]
-    aux_prefixes = [
-        agg["prefix"]
-        for agg in config["pipeline"]["aggregations"].values()
-        if "prefix" in agg
-    ]
+    aux_prefixes = AGGREGATION_PREFIXES
     target_col = config["training"]["target_col"]
     id_col = config["training"]["id_col"]
 
@@ -207,47 +218,45 @@ def impute_missing(train: pl.DataFrame, test: pl.DataFrame, config):
 
 def add_global_features(df: pl.DataFrame, config):
     """Step 6 - Global feature engineering."""
-    print("Adding global features...")
+    logger.info("Adding global features...")
     eps = float(config["globals"]["division_epsilon"])
-    fe_config = config["pipeline"]["feature_engineering"]
-    output_features = fe_config["output_features"]
     fill_value = config["pipeline"]["fill_values"]["generated_missing"]
 
     exprs = [
         _safe_ratio_expr(feature["numerator"], feature["denominator"], feature["name"], eps)
-        for feature in fe_config["global_ratio_features"]
+        for feature in GLOBAL_RATIO_FEATURES
         if all(col in df.columns for col in [feature["numerator"], feature["denominator"]])
     ]
 
-    ext_cols = fe_config["ext_sources"]
+    ext_cols = EXT_SOURCES
     if all(col in df.columns for col in ext_cols):
         df = df.with_columns([pl.col(col).cast(pl.Float64, strict=False) for col in ext_cols])
-        exprs.append(pl.mean_horizontal(ext_cols).alias(output_features["ext_sources_mean"]))
-        exprs.append(pl.min_horizontal(ext_cols).alias(output_features["ext_sources_min"]))
-        exprs.append(pl.max_horizontal(ext_cols).alias(output_features["ext_sources_max"]))
+        exprs.append(pl.mean_horizontal(ext_cols).alias(OUTPUT_FEATURES["ext_sources_mean"]))
+        exprs.append(pl.min_horizontal(ext_cols).alias(OUTPUT_FEATURES["ext_sources_min"]))
+        exprs.append(pl.max_horizontal(ext_cols).alias(OUTPUT_FEATURES["ext_sources_max"]))
         exprs.append(
             (pl.max_horizontal(ext_cols) - pl.min_horizontal(ext_cols))
-            .alias(output_features["ext_sources_range"])
+            .alias(OUTPUT_FEATURES["ext_sources_range"])
         )
         exprs.append(
             (pl.col(ext_cols[0]) * pl.col(ext_cols[1]) * pl.col(ext_cols[2]))
-            .alias(output_features["ext_sources_prod"])
+            .alias(OUTPUT_FEATURES["ext_sources_prod"])
         )
         mean = pl.mean_horizontal(ext_cols)
         exprs.append(
             pl.mean_horizontal([(pl.col(col) - mean) ** 2 for col in ext_cols])
             .sqrt()
-            .alias(output_features["ext_sources_std"])
+            .alias(OUTPUT_FEATURES["ext_sources_std"])
         )
-        for base_col in fe_config["ext_source_interaction_bases"]:
+        for base_col in EXT_SOURCE_INTERACTION_BASES:
             if base_col in df.columns:
                 for ext_col in ext_cols:
                     exprs.append(_safe_ratio_expr(base_col, ext_col, f"{base_col}_TO_{ext_col}", eps))
 
-    enq_cols = fe_config["enquiry_cols"]
+    enq_cols = ENQUIRY_COLS
     if all(col in df.columns for col in enq_cols):
         df = df.with_columns([pl.col(col).cast(pl.Float64, strict=False) for col in enq_cols])
-        exprs.append(pl.sum_horizontal(enq_cols).alias(output_features["enquiry_total"]))
+        exprs.append(pl.sum_horizontal(enq_cols).alias(OUTPUT_FEATURES["enquiry_total"]))
 
     if exprs:
         df = df.with_columns(exprs)
@@ -268,7 +277,7 @@ def add_global_features(df: pl.DataFrame, config):
 
 def feature_cleanup(train: pl.DataFrame, test: pl.DataFrame, config):
     """Step 7 - Feature cleanup."""
-    print("Cleaning up features...")
+    logger.info("Cleaning up features...")
     corr_threshold = config["pipeline"]["correlation_threshold"]
     var_threshold = config["pipeline"]["variance_threshold"]
     fill_value = config["pipeline"]["fill_values"]["test_missing_column"]
@@ -284,7 +293,7 @@ def feature_cleanup(train: pl.DataFrame, test: pl.DataFrame, config):
     upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
 
     to_drop_corr = [column for column in upper.columns if any(upper[column] > corr_threshold)]
-    print(f"  Dropping {len(to_drop_corr)} correlated cols")
+    logger.info("Dropping %s correlated cols", len(to_drop_corr))
     train = train.drop(to_drop_corr, strict=False)
 
     to_drop_var = []
@@ -297,7 +306,7 @@ def feature_cleanup(train: pl.DataFrame, test: pl.DataFrame, config):
         if max_prop > var_threshold:
             to_drop_var.append(col)
 
-    print(f"  Dropping {len(to_drop_var)} low var cols")
+    logger.info("Dropping %s low var cols", len(to_drop_var))
     train = train.drop(to_drop_var, strict=False)
 
     test_cols = [col for col in train.columns if col != target_col]
@@ -315,7 +324,7 @@ def feature_cleanup(train: pl.DataFrame, test: pl.DataFrame, config):
 
 def validate(train: pl.DataFrame, test: pl.DataFrame, config):
     """Step 8 - Validation."""
-    print("Validating...")
+    logger.info("Validating...")
     errors = []
     target_col = config["training"]["target_col"]
     id_col = config["training"]["id_col"]
@@ -339,4 +348,4 @@ def validate(train: pl.DataFrame, test: pl.DataFrame, config):
     if errors:
         raise ValueError("Validation failed: " + "; ".join(errors))
 
-    print(f"Validation passed. Train: {train.shape}, Test: {test.shape}")
+    logger.info("Validation passed. Train: %s, Test: %s", train.shape, test.shape)

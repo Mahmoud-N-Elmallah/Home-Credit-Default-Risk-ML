@@ -1,8 +1,13 @@
 from pathlib import Path
+import logging
 
 import polars as pl
 import yaml
 
+from src.data_processing.constants import SCHEMA_OVERRIDES
+
+
+logger = logging.getLogger(__name__)
 
 POLARS_DTYPES = {
     "Int8": pl.Int8,
@@ -31,7 +36,7 @@ def _csv_options(config):
     csv_config = config["data"]["csv"]
     schema_overrides = {
         col: _polars_dtype(dtype_name)
-        for col, dtype_name in csv_config.get("schema_overrides", {}).items()
+        for col, dtype_name in SCHEMA_OVERRIDES.items()
     }
     return {
         "infer_schema_length": csv_config["infer_schema_length"],
@@ -43,7 +48,7 @@ def _csv_options(config):
 
 def load_data(raw_paths, config):
     """Step 0 - Load & organize source files."""
-    print("Loading data...")
+    logger.info("Loading data...")
     csv_options = _csv_options(config)
 
     train_base = pl.read_csv(raw_paths["application_train"], **csv_options)
@@ -78,7 +83,7 @@ def write_feature_manifest(train: pl.DataFrame, test: pl.DataFrame, config, clea
     }
     with open(manifest_path, "w", encoding="utf-8") as file:
         yaml.safe_dump(manifest, file, sort_keys=False)
-    print(f"Feature manifest saved to {manifest_path}")
+    logger.info("Feature manifest saved to %s", manifest_path)
 
 
 def latest_submission_path(config):

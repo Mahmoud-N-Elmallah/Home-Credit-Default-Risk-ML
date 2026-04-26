@@ -1,14 +1,17 @@
 import json
+import logging
 from pathlib import Path
 
 import joblib
 import pandas as pd
 
 from src.common.artifacts import model_artifact_path
-from src.common.config_io import load_yaml, resolve_project_path
+from src.common.config_io import resolve_project_path
+from src.common.logging import configure_logging
 from src.common.schema import clean_column_names, expected_preprocessor_input_columns
 
 resolve_path = resolve_project_path
+logger = logging.getLogger(__name__)
 
 
 def experiment_path(config, experiment_dir_arg):
@@ -98,15 +101,15 @@ def load_threshold(config, experiment_dir, threshold_arg):
 
 
 def run_inference(
-    config_path,
+    config,
     experiment_dir_arg=None,
     input_arg=None,
     json_arg=None,
     output_arg=None,
     threshold_arg=None,
 ):
-    config = load_yaml(config_path)
     experiment_dir = experiment_path(config, experiment_dir_arg)
+    configure_logging(experiment_dir / "logs", "inference.log")
     artifact_paths = config["training"]["artifact_paths"]
 
     model_path = experiment_dir / artifact_paths["single_model"]
@@ -140,10 +143,10 @@ def run_inference(
     path.parent.mkdir(parents=True, exist_ok=True)
     output.to_csv(path, index=False)
 
-    print(f"Inference saved to {path}")
-    print(f"Rows scored: {len(output)}")
+    logger.info("Inference saved to %s", path)
+    logger.info("Rows scored: %s", len(output))
     if alignment["missing_columns"]:
-        print(f"Missing features filled: {len(alignment['missing_columns'])}")
+        logger.info("Missing features filled: %s", len(alignment["missing_columns"]))
     if alignment["extra_columns"]:
-        print(f"Extra input columns ignored: {len(alignment['extra_columns'])}")
+        logger.info("Extra input columns ignored: %s", len(alignment["extra_columns"]))
     return output

@@ -1,25 +1,29 @@
 import argparse
+import logging
 from pathlib import Path
 
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import yaml
 from catboost import Pool
 from sklearn.model_selection import train_test_split
 
-from src.common.config_io import load_yaml, resolve_project_path
+from src.common.config_io import load_hydra_config, resolve_project_path
+from src.common.logging import configure_logging
 from src.common.schema import clean_column_names, expected_preprocessor_input_columns
 
 resolve_path = resolve_project_path
+logger = logging.getLogger(__name__)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run native CatBoost SHAP analysis for a trained experiment.")
-    parser.add_argument("--config", default="config.yaml", help="Path to project config YAML.")
     parser.add_argument("--experiment-dir", help="Trained experiment directory. Defaults to analysis.shap config.")
     parser.add_argument("--sample-size", type=int, help="Stratified train sample size for SHAP.")
     parser.add_argument("--top-n", type=int, help="Number of top SHAP features to plot.")
+    parser.add_argument("overrides", nargs="*", help="Hydra overrides, for example analysis.shap.sample_size=1000.")
     return parser.parse_args()
 
 
@@ -79,7 +83,7 @@ def load_and_transform_sample(config, experiment_dir, sample_size):
     if not preprocessor_path.exists():
         raise FileNotFoundError(f"Preprocessor artifact not found: {preprocessor_path}")
     if not train_path.exists():
-        raise FileNotFoundError(f"Final training data not found: {train_path}. Run --process first.")
+        raise FileNotFoundError(f"Final training data not found: {train_path}. Run run.step=process first.")
 
     model = joblib.load(model_path)
     preprocessor = joblib.load(preprocessor_path)
@@ -283,10 +287,10 @@ def save_metadata(
         yaml.safe_dump(metadata, file, sort_keys=False)
 
 
-def run_shap_analysis(config_path, experiment_dir_arg=None, sample_size_arg=None, top_n_arg=None):
-    config = load_yaml(config_path)
+def run_shap_analysis(config, experiment_dir_arg=None, sample_size_arg=None, top_n_arg=None):
     shap_settings = shap_config(config)
     experiment_dir = resolve_path(experiment_dir_arg or config["artifacts"]["best_experiment_dir"])
+    configure_logging(experiment_dir / "logs", "shap.log")
     sample_size = int(sample_size_arg if sample_size_arg is not None else shap_settings["sample_size"])
     top_n = int(top_n_arg if top_n_arg is not None else shap_settings["top_n"])
 
@@ -338,12 +342,12 @@ def run_shap_analysis(config_path, experiment_dir_arg=None, sample_size_arg=None
     )
     plot_dependence(X_processed, shap_values, feature_importance, experiment_dir, shap_settings)
 
-    print(f"SHAP analysis saved to {experiment_dir}")
+    logger.info("SHAP analysis saved to %s", experiment_dir)
     preview_count = min(top_n, int(shap_settings["console_preview_limit"]))
-    print(feature_importance.head(preview_count).to_string(index=False))
+    logger.info("Top SHAP features:\n%s", feature_importance.head(preview_count).to_string(index=False))
 
 
 def main():
     args = parse_args()
-    config_path = resolve_path(args.config)
-    run_shap_analysis(config_path, args.experiment_dir, args.sample_size, args.top_n)
+    config = load_hydra_config(args.overrides)
+    run_shap_analysis(config, args.experiment_dir, args.sample_size, args.top_n)

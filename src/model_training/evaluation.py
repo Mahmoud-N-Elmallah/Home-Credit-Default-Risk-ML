@@ -233,7 +233,6 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     metrics = {
         "model": model_name,
         "evaluation_scope": evaluation_scope,
-        "run_mode": t_config["run_mode"],
         "threshold": threshold_info,
         "ranking": {
             "roc_auc": float(roc_auc_score(y_true, y_pred_prob)),
@@ -250,7 +249,6 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     report_str = f"Model: {model_name}\n"
     report_str += "=" * 40 + "\n"
     report_str += f"Evaluation Scope: {evaluation_scope}\n"
-    report_str += f"Run Mode: {t_config['run_mode']}\n"
     report_str += f"Classification Threshold: {threshold:.4f}\n"
     report_str += f"Threshold Source: {threshold_info['source']}\n"
     report_str += f"Threshold Objective: {threshold_info['objective']}\n"

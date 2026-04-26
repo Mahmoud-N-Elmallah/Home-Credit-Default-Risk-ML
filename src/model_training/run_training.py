@@ -1,10 +1,12 @@
 from pathlib import Path
+import logging
 
 import joblib
 import optuna
 import pandas as pd
 
 from src.common.artifacts import model_artifact_path
+from src.common.logging import configure_logging
 from src.common.schema import clean_column_names
 from src.model_training.artifacts import (
     build_run_metadata,
@@ -18,12 +20,14 @@ from src.model_training.config import (
     get_estimator_config_by_name,
     get_primary_estimator_config,
     primary_model_name,
-    resolve_training_config,
 )
 from src.model_training.evaluation import save_evaluation_report
 from src.model_training.models import ACCELERATOR_CACHE
 from src.model_training.preprocessing import TrainingPreprocessor
 from src.model_training.search import cross_validated_single_predictions, fit_final_single_model, run_single_search
+
+
+logger = logging.getLogger(__name__)
 
 
 def configure_optuna_logging(config):
@@ -39,23 +43,24 @@ def configure_optuna_logging(config):
 
 
 def run_training(config):
-    config = resolve_training_config(config)
-    print(f"Initializing training pipeline ({config['training']['run_mode']})...")
+    logger.info("Initializing training pipeline...")
     t_config = config["training"]
     seed = config["globals"]["random_state"]
     models_root = Path(t_config["artifact_paths"]["models_dir"])
     models_root.mkdir(parents=True, exist_ok=True)
     models_dir, experiment_id, timestamp = create_experiment_dir(models_root, config)
+    training_log = configure_logging(models_dir / "logs", "training.log")
     save_config_snapshot(models_dir, config)
-    print(f"Experiment artifacts: {models_dir}")
+    logger.info("Experiment artifacts: %s", models_dir)
+    logger.info("Training log: %s", training_log)
     configure_optuna_logging(config)
 
     train_path = Path(config["data"]["final"]["train"])
     test_path = Path(config["data"]["final"]["test"])
     if not train_path.exists():
-        raise FileNotFoundError(f"Training data not found at {train_path}. Run --process first.")
+        raise FileNotFoundError(f"Training data not found at {train_path}. Run run.step=process first.")
     if not test_path.exists():
-        raise FileNotFoundError(f"Test data not found at {test_path}. Run --process first.")
+        raise FileNotFoundError(f"Test data not found at {test_path}. Run run.step=process first.")
 
     df = pd.read_csv(train_path)
     train_ids = df[t_config["id_col"]]
@@ -85,7 +90,7 @@ def run_single_phases(X, y, ids, config, models_dir, seed, metadata):
         metadata["chosen_threshold"] = search_threshold
     if phases["validate"] and t_config["run_full_oof_validation"]:
         report_name = f"{name}_optuna"
-        print("Scoring best model with full-data OOF validation...")
+        logger.info("Scoring best model with full-data OOF validation...")
         oof_preds = cross_validated_single_predictions(
             X,
             y,
@@ -105,7 +110,7 @@ def run_single_phases(X, y, ids, config, models_dir, seed, metadata):
             ids=ids,
         )
     elif phases["validate"]:
-        print("Skipping full-data OOF validation by run profile.")
+        logger.info("Skipping full-data OOF validation by run profile.")
 
     if phases["final_fit"]:
         model, preprocessor, accelerator = fit_final_single_model(X, y, best_config, config, models_dir, name)
@@ -114,10 +119,10 @@ def run_single_phases(X, y, ids, config, models_dir, seed, metadata):
 
 
 def predict_test_and_submit(model_obj, config, models_dir, preprocessor=None):
-    print("Generating predictions...")
+    logger.info("Generating predictions...")
     test_path = Path(config["data"]["final"]["test"])
     if not test_path.exists():
-        raise FileNotFoundError(f"Test data not found at {test_path}. Run --process first.")
+        raise FileNotFoundError(f"Test data not found at {test_path}. Run run.step=process first.")
 
     df_test = pd.read_csv(test_path)
     id_col = config["training"]["id_col"]
@@ -143,4 +148,4 @@ def predict_test_and_submit(model_obj, config, models_dir, preprocessor=None):
     if len(submission) != len(df_test):
         raise ValueError("Submission row count does not match test row count.")
     submission.to_csv(submission_path, index=False)
-    print(f"Submission saved to {submission_path}")
+    logger.info("Submission saved to %s", submission_path)
