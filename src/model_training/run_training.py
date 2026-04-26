@@ -17,7 +17,6 @@ from src.model_training.artifacts import (
     write_run_metadata,
 )
 from src.model_training.config import (
-    get_estimator_config_by_name,
     get_primary_estimator_config,
     primary_model_name,
 )
@@ -25,6 +24,7 @@ from src.model_training.evaluation import save_evaluation_report
 from src.model_training.models import ACCELERATOR_CACHE
 from src.model_training.preprocessing import TrainingPreprocessor
 from src.model_training.search import cross_validated_single_predictions, fit_final_single_model, run_single_search
+from src.model_training.tracking import tracking_run
 
 
 logger = logging.getLogger(__name__)
@@ -69,13 +69,15 @@ def run_training(config):
     metadata = build_run_metadata(config, X, y, train_path, experiment_id, timestamp)
     validate_reusable_artifacts(models_dir, config, metadata)
 
-    run_single_phases(X, y, train_ids, config, models_dir, seed, metadata)
+    with tracking_run(config, models_dir, metadata) as tracker:
+        run_single_phases(X, y, train_ids, config, models_dir, seed, metadata)
 
-    metadata["selected_accelerators"].update(
-        {f"{name}:{mode}": acc for (name, mode), acc in ACCELERATOR_CACHE.items()}
-    )
-    write_run_metadata(models_dir, config, metadata)
-    write_latest_experiment_pointer(models_root, config, models_dir)
+        metadata["selected_accelerators"].update(
+            {str(name): acc for name, acc in ACCELERATOR_CACHE.items()}
+        )
+        write_run_metadata(models_dir, config, metadata)
+        write_latest_experiment_pointer(models_root, config, models_dir)
+        tracker.log_final(metadata)
 
 
 def run_single_phases(X, y, ids, config, models_dir, seed, metadata):
@@ -110,7 +112,7 @@ def run_single_phases(X, y, ids, config, models_dir, seed, metadata):
             ids=ids,
         )
     elif phases["validate"]:
-        logger.info("Skipping full-data OOF validation by run profile.")
+        logger.info("Skipping full-data OOF validation by config.")
 
     if phases["final_fit"]:
         model, preprocessor, accelerator = fit_final_single_model(X, y, best_config, config, models_dir, name)

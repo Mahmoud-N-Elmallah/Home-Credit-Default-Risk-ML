@@ -15,7 +15,7 @@ Best project result: **0.79074 public leaderboard ROC AUC** from
 
 1. **Process data**: read raw Kaggle CSVs, build application/bureau/history
    features, align train/test, and write `Data/final/`.
-2. **Train model**: tune the primary model, validate with OOF predictions, tune
+2. **Train model**: tune the primary model, validate with OOF metrics, tune
    report thresholds, fit the final model, and write artifacts under
    `Models/<experiment_id>/`.
 
@@ -125,21 +125,31 @@ Common artifacts:
 config_snapshot.yaml
 training_run_metadata.yaml
 logs/training.log
+threshold.yaml
 final_model.pkl
 training_preprocessor.pkl
-threshold.yaml
 submission.csv
-reports/
-plots/
+reports/evaluation_report.txt
+reports/metrics.yaml
+reports/threshold_table.csv
+reports/feature_importance.csv
+plots/confusion_matrix.png
+plots/roc_curve.png
+plots/feature_importance_top.png
 ```
 
 Submission file: `Models/<experiment_id>/submission.csv`, with
 `SK_ID_CURR,TARGET`; `TARGET` is a probability for Kaggle ROC AUC scoring.
 
+MLflow tracking is configured for DagsHub by default. Local artifacts remain the
+source of truth; MLflow mirrors key params, metrics, and curated artifacts. Use
+`tracking.mlflow.enabled=false` to disable tracking for local smoke runs.
+
 ## Config
 
 `conf/config.yaml` is the Hydra source of truth for runtime paths, training
-controls, model settings, artifact names, and analysis/inference defaults.
+controls, tracking settings, model settings, artifact names, and
+analysis/inference defaults.
 
 Fixed Kaggle schema, source column names, engineered feature names, and
 aggregation specs live in `src/data_processing/constants.py`. Historical

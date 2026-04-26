@@ -75,7 +75,6 @@ def load_and_transform_sample(config, experiment_dir, sample_size):
     preprocessor_path = experiment_dir / artifact_paths["preprocessor"]
     train_path = resolve_path(config["data"]["final"]["train"])
     target_col = config["training"]["target_col"]
-    id_col = config["training"]["id_col"]
     seed = config["globals"]["random_state"]
 
     if not model_path.exists():
@@ -92,12 +91,9 @@ def load_and_transform_sample(config, experiment_dir, sample_size):
     df = pd.read_csv(train_path)
     sample = sample_training_rows(df, target_col, sample_size, seed)
 
-    ids = sample[id_col].reset_index(drop=True)
-    y = sample[target_col].reset_index(drop=True)
-    X = clean_column_names(sample.drop(columns=[target_col, id_col])).reset_index(drop=True)
+    X = clean_column_names(sample.drop(columns=[target_col, config["training"]["id_col"]])).reset_index(drop=True)
     X, alignment = align_to_preprocessor_input(X, preprocessor)
     X_processed = preprocessor.transform(X)
-    probabilities = model.predict_proba(X_processed)[:, 1]
 
     native_importance = model.get_feature_importance()
     if X_processed.shape[1] != len(native_importance):
@@ -109,9 +105,6 @@ def load_and_transform_sample(config, experiment_dir, sample_size):
     return {
         "model": model,
         "X_processed": X_processed,
-        "ids": ids,
-        "y": y,
-        "probabilities": probabilities,
         "native_importance": native_importance,
         "alignment": alignment,
         "paths": {
@@ -142,23 +135,6 @@ def build_feature_importance(feature_names, shap_values, native_importance):
     ).sort_values("mean_abs_shap", ascending=False)
     frame["rank"] = np.arange(1, len(frame) + 1)
     return frame
-
-
-def build_sample_predictions(ids, y, probabilities, expected_values, feature_names, shap_values):
-    top_positive_idx = np.argmax(shap_values, axis=1)
-    top_negative_idx = np.argmin(shap_values, axis=1)
-    return pd.DataFrame(
-        {
-            "SK_ID_CURR": ids,
-            "TARGET": y,
-            "predicted_probability": probabilities,
-            "expected_value": expected_values,
-            "top_positive_feature": [feature_names[idx] for idx in top_positive_idx],
-            "top_positive_shap": shap_values[np.arange(len(shap_values)), top_positive_idx],
-            "top_negative_feature": [feature_names[idx] for idx in top_negative_idx],
-            "top_negative_shap": shap_values[np.arange(len(shap_values)), top_negative_idx],
-        }
-    )
 
 
 def plot_summary_bar(feature_importance, output_file, top_n, plot_config):
@@ -225,36 +201,6 @@ def plot_beeswarm_like(X_processed, shap_values, feature_importance, output_file
     plt.close()
 
 
-def plot_dependence(X_processed, shap_values, feature_importance, experiment_dir, shap_settings):
-    plot_config = shap_settings["plot"]
-    dependence_template = shap_settings["plots"]["dependence_template"]
-    count = int(shap_settings["dependence_plot_count"])
-    for rank, feature in enumerate(feature_importance.head(count)["feature"], start=1):
-        col_idx = X_processed.columns.get_loc(feature)
-        plt.figure(figsize=tuple(plot_config["dependence_figsize"]))
-        plt.scatter(
-            X_processed[feature],
-            shap_values[:, col_idx],
-            s=float(plot_config["dependence_marker_size"]),
-            alpha=float(plot_config["dependence_alpha"]),
-            color=plot_config["dependence_color"],
-        )
-        plt.axhline(
-            0,
-            color=plot_config["zero_line_color"],
-            linewidth=float(plot_config["zero_line_width"]),
-        )
-        plt.xlabel(f"{feature} (processed value)")
-        plt.ylabel("SHAP value")
-        plt.title(f"SHAP Dependence: {feature}")
-        plt.tight_layout()
-        plt.savefig(
-            output_path(experiment_dir, dependence_template.format(rank=rank)),
-            dpi=int(plot_config["dpi"]),
-        )
-        plt.close()
-
-
 def save_metadata(
     config,
     experiment_dir,
@@ -296,24 +242,15 @@ def run_shap_analysis(config, experiment_dir_arg=None, sample_size_arg=None, top
 
     payload = load_and_transform_sample(config, experiment_dir, sample_size)
     X_processed = payload["X_processed"]
-    shap_values, expected_values = compute_shap_values(payload["model"], X_processed)
+    shap_values, _ = compute_shap_values(payload["model"], X_processed)
     feature_names = X_processed.columns.to_list()
     feature_importance = build_feature_importance(feature_names, shap_values, payload["native_importance"])
-    sample_predictions = build_sample_predictions(
-        payload["ids"],
-        payload["y"],
-        payload["probabilities"],
-        expected_values,
-        feature_names,
-        shap_values,
-    )
 
     reports_config = shap_settings["reports"]
     plots_config = shap_settings["plots"]
     plot_config = shap_settings["plot"]
 
     feature_importance.to_csv(output_path(experiment_dir, reports_config["feature_importance"]), index=False)
-    sample_predictions.to_csv(output_path(experiment_dir, reports_config["sample_predictions"]), index=False)
     save_metadata(
         config,
         experiment_dir,
@@ -340,7 +277,6 @@ def run_shap_analysis(config, experiment_dir_arg=None, sample_size_arg=None, top
         config["globals"]["random_state"],
         plot_config,
     )
-    plot_dependence(X_processed, shap_values, feature_importance, experiment_dir, shap_settings)
 
     logger.info("SHAP analysis saved to %s", experiment_dir)
     preview_count = min(top_n, int(shap_settings["console_preview_limit"]))

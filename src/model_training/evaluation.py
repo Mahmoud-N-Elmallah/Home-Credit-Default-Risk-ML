@@ -10,7 +10,6 @@ from sklearn.metrics import (
     classification_report,
     confusion_matrix,
     f1_score,
-    precision_recall_curve,
     precision_score,
     recall_score,
     roc_auc_score,
@@ -124,56 +123,7 @@ def choose_threshold(y_true, y_pred_prob, config, evaluation_scope):
     }, table
 
 
-def build_lift_table(y_true, y_pred_prob, config):
-    deciles = int(config["training"]["evaluation"]["lift_deciles"])
-    frame = pd.DataFrame({"target": np.asarray(y_true), "prediction": np.asarray(y_pred_prob)})
-    frame = frame.sort_values("prediction", ascending=False).reset_index(drop=True)
-    frame["decile"] = np.floor(np.arange(len(frame)) * deciles / len(frame)).astype(int) + 1
-    total_defaults = frame["target"].sum()
-    lift = (
-        frame.groupby("decile", as_index=False)
-        .agg(
-            row_count=("target", "size"),
-            default_count=("target", "sum"),
-            default_rate=("target", "mean"),
-            min_score=("prediction", "min"),
-            max_score=("prediction", "max"),
-        )
-        .sort_values("decile")
-    )
-    lift = (
-        lift.set_index("decile")
-        .reindex(range(1, deciles + 1))
-        .rename_axis("decile")
-        .reset_index()
-    )
-    for col in ["row_count", "default_count"]:
-        lift[col] = lift[col].fillna(0).astype(int)
-    lift["default_rate"] = lift["default_rate"].fillna(0.0)
-    lift["cumulative_default_count"] = lift["default_count"].cumsum()
-    if total_defaults > 0:
-        lift["cumulative_default_capture"] = lift["cumulative_default_count"] / total_defaults
-    else:
-        lift["cumulative_default_capture"] = 0.0
-    return lift
-
-
-def save_oof_predictions(y_true, y_pred_prob, ids, models_dir, config):
-    if not config["training"]["reports"]["save_oof_predictions"]:
-        return
-    id_col = config["training"]["id_col"]
-    target_col = config["training"]["target_col"]
-    output = pd.DataFrame(
-        {
-            id_col: ids.to_numpy() if ids is not None else np.arange(len(y_true)),
-            target_col: np.asarray(y_true),
-            "prediction": np.asarray(y_pred_prob),
-        }
-    )
-    output.to_csv(model_artifact_path(models_dir, config, "oof_predictions"), index=False)
-
-
-def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_name, models_dir, config, evaluation_scope):
+def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, model_name, models_dir, config, evaluation_scope):
     if not config["training"]["reports"]["save_curves"]:
         return
 
@@ -199,25 +149,6 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_nam
     plt.savefig(model_artifact_path(models_dir, config, "roc_curve"))
     plt.close()
 
-    precision, recall, _ = precision_recall_curve(y_true, y_pred_prob)
-    plt.figure(figsize=tuple(eval_config["pr_curve_figsize"]))
-    plt.plot(recall, precision)
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.title(f"Precision-Recall Curve: {model_name}")
-    plt.tight_layout()
-    plt.savefig(model_artifact_path(models_dir, config, "pr_curve"))
-    plt.close()
-
-    plt.figure(figsize=tuple(eval_config["lift_chart_figsize"]))
-    plt.bar(lift_table["decile"], lift_table["default_rate"])
-    plt.xlabel("Risk Decile (1 = highest risk)")
-    plt.ylabel("Default Rate")
-    plt.title(f"Lift by Decile: {model_name}")
-    plt.tight_layout()
-    plt.savefig(model_artifact_path(models_dir, config, "lift_chart"))
-    plt.close()
-
 
 def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, evaluation_scope, ids=None):
     allowed_scopes = {"out_of_fold", "search_subsample_cv", "final_train_fit"}
@@ -229,7 +160,6 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     threshold_info, threshold_table = choose_threshold(y_true, y_pred_prob, config, evaluation_scope)
     threshold = threshold_info["threshold"]
     y_pred_bin = (y_pred_prob > threshold).astype(int)
-    lift_table = build_lift_table(y_true, y_pred_prob, config)
     metrics = {
         "model": model_name,
         "evaluation_scope": evaluation_scope,
@@ -271,8 +201,5 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
         yaml.safe_dump(threshold_info, file, sort_keys=False)
     if config["training"]["reports"]["save_threshold_table"]:
         threshold_table.to_csv(model_artifact_path(models_dir, config, "threshold_table"), index=False)
-    if config["training"]["reports"]["save_lift_table"]:
-        lift_table.to_csv(model_artifact_path(models_dir, config, "lift_table"), index=False)
-    save_oof_predictions(y_true, y_pred_prob, ids, models_dir, config)
-    save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, lift_table, model_name, models_dir, config, evaluation_scope)
+    save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, model_name, models_dir, config, evaluation_scope)
     return threshold_info
