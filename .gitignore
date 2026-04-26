@@ -17,7 +17,9 @@ Models/baseline/*
 !Models/baseline/feature_importance_top.png
 !Models/baseline/roc_curve.png
 Models/hydra_runs/
-Data/
+Data/*
+!Data/*.dvc
+!Data/.gitignore
 .env
 catboost_info/
 Notebooks/*
