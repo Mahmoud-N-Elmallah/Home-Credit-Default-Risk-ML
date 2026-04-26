@@ -2,6 +2,7 @@ import logging
 import re
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
 import yaml
 
@@ -45,6 +46,30 @@ def dvc_remote_url():
         return None
     match = re.search(r"^\s*url\s*=\s*(.+?)\s*$", config_path.read_text(encoding="utf-8"), re.MULTILINE)
     return match.group(1) if match else None
+
+
+def dagshub_repo_from_uri(tracking_uri):
+    parsed = urlparse(tracking_uri)
+    if parsed.netloc.lower() != "dagshub.com":
+        return None
+    parts = [part for part in parsed.path.strip("/").split("/") if part]
+    if len(parts) != 2 or not parts[1].endswith(".mlflow"):
+        return None
+    return parts[0], parts[1].removesuffix(".mlflow")
+
+
+def configure_tracking_backend(config_section):
+    tracking_uri = config_section["tracking_uri"]
+    repo = dagshub_repo_from_uri(tracking_uri)
+    if repo:
+        import dagshub
+
+        dagshub.init(repo_owner=repo[0], repo_name=repo[1], mlflow=True)
+        return
+
+    import mlflow
+
+    mlflow.set_tracking_uri(tracking_uri)
 
 
 def numeric_items(payload, prefix=""):
@@ -166,7 +191,7 @@ def tracking_run(config, models_dir, metadata):
     import mlflow
 
     config_section = mlflow_config(config)
-    mlflow.set_tracking_uri(config_section["tracking_uri"])
+    configure_tracking_backend(config_section)
     mlflow.set_experiment(config_section["experiment_name"])
     mlflow.start_run(run_name=metadata["experiment_id"])
     tracker = MlflowTracker(mlflow, config, models_dir)

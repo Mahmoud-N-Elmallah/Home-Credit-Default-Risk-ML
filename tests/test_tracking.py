@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.model_training.tracking import MlflowTracker, numeric_items, tracking_run
+from src.model_training.tracking import MlflowTracker, dagshub_repo_from_uri, numeric_items, tracking_run
 
 
 def tracking_config(enabled=False):
@@ -70,6 +70,14 @@ class TrackingTest(unittest.TestCase):
         metrics = {"ranking": {"roc_auc": 0.8}, "name": "model", "flag": True}
 
         self.assertEqual(dict(numeric_items(metrics)), {"ranking.roc_auc": 0.8})
+
+    def test_dagshub_repo_from_uri_parses_tracking_uri(self):
+        uri = "https://dagshub.com/mahmoudelmalah85/Home-Credit-Default-Risk-ML.mlflow"
+
+        self.assertEqual(
+            dagshub_repo_from_uri(uri),
+            ("mahmoudelmalah85", "Home-Credit-Default-Risk-ML"),
+        )
 
     def test_artifact_logging_skips_missing_files(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
