@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import joblib
+import mlflow.pyfunc
 import pandas as pd
 import yaml
 
@@ -28,7 +29,7 @@ class NullTracker:
         return
 
 
-class CreditRiskPyFuncModel:
+class CreditRiskPyFuncModel(mlflow.pyfunc.PythonModel):
     def __init__(self, model, preprocessor, id_col, target_col, probability_col):
         self.model = model
         self.preprocessor = preprocessor
@@ -253,7 +254,6 @@ class MlflowTracker:
             logger.warning("MLflow model registry step failed: %s", error)
 
     def _log_pyfunc_model(self, registry):
-        import mlflow
         from mlflow.models import infer_signature
 
         model_path = model_artifact_path(self.models_dir, self.config, "single_model", model_name=primary_model_name(self.config))
@@ -273,7 +273,7 @@ class MlflowTracker:
         )
         prediction_example = pyfunc_model.predict(None, input_example)
         signature = infer_signature(input_example, prediction_example)
-        return mlflow.pyfunc.log_model(
+        return self.mlflow.pyfunc.log_model(
             artifact_path=PYFUNC_ARTIFACT_PATH,
             python_model=pyfunc_model,
             input_example=input_example,
@@ -297,10 +297,23 @@ class MlflowTracker:
         model_name = registry["registered_model_name"]
         tags = base_tags(self.config, metadata, self.models_dir)
         for key, value in tags.items():
-            client.set_model_version_tag(model_name, version, key, truncate(value, MAX_TAG_LENGTH))
+            try:
+                client.set_model_version_tag(model_name, version, key, truncate(value, MAX_TAG_LENGTH))
+            except Exception as error:
+                logger.warning("Could not set MLflow model version tag %s=%s: %s", key, value, error)
         alias = registry.get("alias")
         if alias:
-            client.set_registered_model_alias(model_name, alias, version)
+            try:
+                client.set_registered_model_alias(model_name, alias, version)
+            except Exception as error:
+                logger.warning("Could not set MLflow registered model alias %s -> %s: %s", alias, version, error)
+
+
+def end_mlflow_run(mlflow_module, status):
+    try:
+        mlflow_module.end_run(status=status)
+    except UnicodeEncodeError as error:
+        logger.warning("MLflow ended the run but failed to print its run URL on this terminal encoding: %s", error)
 
 
 @contextmanager
@@ -319,9 +332,9 @@ def tracking_run(config, models_dir, metadata):
     tracker.log_start(metadata)
     try:
         yield tracker
-        mlflow.end_run(status="FINISHED")
+        end_mlflow_run(mlflow, status="FINISHED")
     except Exception as error:
         logger.exception("MLflow-tracked training run failed.")
         mlflow.set_tag("error", truncate(error, MAX_TAG_LENGTH))
-        mlflow.end_run(status="FAILED")
+        end_mlflow_run(mlflow, status="FAILED")
         raise

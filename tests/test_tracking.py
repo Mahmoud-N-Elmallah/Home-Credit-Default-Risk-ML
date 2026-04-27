@@ -3,7 +3,10 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.model_training.tracking import MlflowTracker, dagshub_repo_from_uri, numeric_items, tracking_run
+import mlflow.pyfunc
+
+from src.model_training.tracking import CreditRiskPyFuncModel
+from src.model_training.tracking import MlflowTracker, dagshub_repo_from_uri, end_mlflow_run, numeric_items, tracking_run
 
 
 def tracking_config(enabled=False):
@@ -56,6 +59,7 @@ class FakeMlflow:
         self.tags = {}
         self.model_version_tags = {}
         self.aliases = {}
+        self.fail_alias = False
         self.tracking = SimpleNamespace(MlflowClient=lambda: self)
 
     def log_artifact(self, path, artifact_path=None):
@@ -80,6 +84,8 @@ class FakeMlflow:
         self.model_version_tags[(model_name, version, key)] = value
 
     def set_registered_model_alias(self, model_name, alias, version):
+        if self.fail_alias:
+            raise RuntimeError("alias API unavailable")
         self.aliases[(model_name, alias)] = version
 
 
@@ -110,6 +116,14 @@ class TrackingTest(unittest.TestCase):
             dagshub_repo_from_uri(uri),
             ("mahmoudelmalah85", "Home-Credit-Default-Risk-ML"),
         )
+
+    def test_registry_wrapper_is_mlflow_python_model(self):
+        self.assertTrue(issubclass(CreditRiskPyFuncModel, mlflow.pyfunc.PythonModel))
+
+    def test_end_mlflow_run_ignores_terminal_encoding_error(self):
+        fake = SimpleNamespace(end_run=lambda status: (_ for _ in ()).throw(UnicodeEncodeError("cp1252", "", 0, 1, "x")))
+
+        end_mlflow_run(fake, status="FINISHED")
 
     def test_artifact_logging_skips_missing_files(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -201,6 +215,22 @@ class TrackingTest(unittest.TestCase):
                 "x",
             )
             self.assertEqual(len(tracker.registry_calls), 1)
+
+    def test_registry_stays_registered_when_alias_api_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            models_dir = Path(tmp_dir)
+            (models_dir / "reports").mkdir()
+            (models_dir / "reports" / "metrics.yaml").write_text("ranking:\n  roc_auc: 0.9\n", encoding="utf-8")
+            config = tracking_config(enabled=True)
+            config["tracking"]["mlflow"]["registry"]["enabled"] = True
+            fake = FakeMlflow()
+            fake.fail_alias = True
+
+            RegistryTracker(fake, config, models_dir).log_final(
+                {"experiment_id": "x", "primary_model": "catboost", "config_hash": "abc"}
+            )
+
+            self.assertEqual(fake.tags["registry_status"], "registered")
 
 
 if __name__ == "__main__":
