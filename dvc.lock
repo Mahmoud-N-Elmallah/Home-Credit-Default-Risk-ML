@@ -284,7 +284,7 @@ stages:
       size: 5464
     - path: Models/dvc_train/final_model.pkl
       hash: md5
-      md5: 7d8c68e2026ea08186545dda54cc8edd
+      md5: 38d8d1ddb1466762ebcdafc28bf1add2
       size: 1407128
     - path: Models/dvc_train/plots/confusion_matrix.png
       hash: md5
@@ -328,7 +328,7 @@ stages:
       size: 854370
     - path: Models/dvc_train/training_run_metadata.yaml
       hash: md5
-      md5: 8dabaace1e1429ef50f1501077c57ab9
+      md5: 45cfb4e3db10601f1c3123c4e3855874
       size: 1055
   download:
     cmd: uv run python main.py run.step=download
