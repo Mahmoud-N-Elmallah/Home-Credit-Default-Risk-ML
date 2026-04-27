@@ -2,27 +2,30 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.common.artifacts import model_artifact_path
+from src.common.artifacts import model_artifact_path, training_artifact_relative_path, training_models_dir
 from src.model_training.artifacts import create_experiment_dir
 
 
 class ModelArtifactPathTest(unittest.TestCase):
     def test_resolves_relative_artifact_inside_experiment_dir(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            config = {"training": {"artifact_paths": {"metrics": "reports/metrics.yaml"}}}
+            config = {"training": {}}
 
             path = model_artifact_path(tmp_dir, config, "metrics")
 
             self.assertEqual(path, Path(tmp_dir) / "reports" / "metrics.yaml")
             self.assertTrue(path.parent.exists())
 
-    def test_resolves_template_artifact_path(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            config = {"training": {"artifact_paths": {"model": "{model_name}.pkl"}}}
+    def test_resolves_training_models_dir_default(self):
+        self.assertEqual(training_models_dir({"training": {}}), Path("Models"))
 
-            path = model_artifact_path(tmp_dir, config, "model", model_name="catboost")
+    def test_resolves_training_artifact_relative_path(self):
+        self.assertEqual(training_artifact_relative_path("single_model"), Path("final_model.pkl"))
 
-            self.assertEqual(path, Path(tmp_dir) / "catboost.pkl")
+    def test_resolves_configured_models_dir(self):
+        config = {"training": {"artifact_paths": {"models_dir": "CustomModels"}}}
+
+        self.assertEqual(training_models_dir(config), Path("CustomModels"))
 
 
 class ExperimentDirTest(unittest.TestCase):

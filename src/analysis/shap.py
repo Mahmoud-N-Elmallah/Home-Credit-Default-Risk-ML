@@ -11,11 +11,43 @@ from catboost import Pool
 from sklearn.model_selection import train_test_split
 
 from src.common.config_io import load_hydra_config, resolve_project_path
+from src.common.artifacts import training_artifact_relative_path
 from src.common.logging import configure_logging
 from src.common.schema import clean_column_names, expected_preprocessor_input_columns
 
 resolve_path = resolve_project_path
 logger = logging.getLogger(__name__)
+
+SHAP_REPORT_PATHS = {
+    "feature_importance": "reports/shap_feature_importance.csv",
+    "metadata": "reports/shap_metadata.yaml",
+}
+
+SHAP_PLOT_PATHS = {
+    "summary_bar": "plots/shap_summary_bar.png",
+    "beeswarm": "plots/shap_beeswarm_top.png",
+}
+
+SHAP_PLOT_STYLE = {
+    "dpi": 160,
+    "bar_fig_width": 10,
+    "bar_fig_min_height": 6,
+    "bar_height_per_feature": 0.28,
+    "bar_color": "#4c78a8",
+    "beeswarm_fig_width": 11,
+    "beeswarm_fig_min_height": 7,
+    "beeswarm_height_per_feature": 0.3,
+    "beeswarm_jitter": 0.28,
+    "beeswarm_marker_size": 8,
+    "beeswarm_alpha": 0.55,
+    "beeswarm_cmap": "coolwarm",
+    "beeswarm_value_percentiles": [1, 99],
+    "zero_line_color": "#333333",
+    "zero_line_width": 1,
+}
+
+METADATA_PREVIEW_LIMIT = 20
+CONSOLE_PREVIEW_LIMIT = 10
 
 
 def parse_args():
@@ -70,9 +102,8 @@ def align_to_preprocessor_input(X, preprocessor):
 
 
 def load_and_transform_sample(config, experiment_dir, sample_size):
-    artifact_paths = config["training"]["artifact_paths"]
-    model_path = experiment_dir / artifact_paths["single_model"]
-    preprocessor_path = experiment_dir / artifact_paths["preprocessor"]
+    model_path = experiment_dir / training_artifact_relative_path("single_model")
+    preprocessor_path = experiment_dir / training_artifact_relative_path("preprocessor")
     train_path = resolve_path(config["data"]["final"]["train"])
     target_col = config["training"]["target_col"]
     seed = config["globals"]["random_state"]
@@ -211,7 +242,6 @@ def save_metadata(
     top_n,
     metadata_path,
 ):
-    preview_limit = int(shap_config(config)["metadata_preview_limit"])
     metadata = {
         "experiment_dir": str(experiment_dir),
         "sample_size": int(sample_size),
@@ -225,8 +255,8 @@ def save_metadata(
             "aligned": bool(alignment["aligned"]),
             "missing_input_column_count": len(alignment["missing_input_columns"]),
             "extra_input_column_count": len(alignment["extra_input_columns"]),
-            "missing_input_columns_preview": alignment["missing_input_columns"][:preview_limit],
-            "extra_input_columns_preview": alignment["extra_input_columns"][:preview_limit],
+            "missing_input_columns_preview": alignment["missing_input_columns"][:METADATA_PREVIEW_LIMIT],
+            "extra_input_columns_preview": alignment["extra_input_columns"][:METADATA_PREVIEW_LIMIT],
         },
     }
     with open(metadata_path, "w", encoding="utf-8") as file:
@@ -246,11 +276,7 @@ def run_shap_analysis(config, experiment_dir_arg=None, sample_size_arg=None, top
     feature_names = X_processed.columns.to_list()
     feature_importance = build_feature_importance(feature_names, shap_values, payload["native_importance"])
 
-    reports_config = shap_settings["reports"]
-    plots_config = shap_settings["plots"]
-    plot_config = shap_settings["plot"]
-
-    feature_importance.to_csv(output_path(experiment_dir, reports_config["feature_importance"]), index=False)
+    feature_importance.to_csv(output_path(experiment_dir, SHAP_REPORT_PATHS["feature_importance"]), index=False)
     save_metadata(
         config,
         experiment_dir,
@@ -259,27 +285,27 @@ def run_shap_analysis(config, experiment_dir_arg=None, sample_size_arg=None, top
         sample_size,
         len(X_processed),
         top_n,
-        output_path(experiment_dir, reports_config["metadata"]),
+        output_path(experiment_dir, SHAP_REPORT_PATHS["metadata"]),
     )
 
     plot_summary_bar(
         feature_importance,
-        output_path(experiment_dir, plots_config["summary_bar"]),
+        output_path(experiment_dir, SHAP_PLOT_PATHS["summary_bar"]),
         top_n,
-        plot_config,
+        SHAP_PLOT_STYLE,
     )
     plot_beeswarm_like(
         X_processed,
         shap_values,
         feature_importance,
-        output_path(experiment_dir, plots_config["beeswarm"]),
+        output_path(experiment_dir, SHAP_PLOT_PATHS["beeswarm"]),
         top_n,
         config["globals"]["random_state"],
-        plot_config,
+        SHAP_PLOT_STYLE,
     )
 
     logger.info("SHAP analysis saved to %s", experiment_dir)
-    preview_count = min(top_n, int(shap_settings["console_preview_limit"]))
+    preview_count = min(top_n, CONSOLE_PREVIEW_LIMIT)
     logger.info("Top SHAP features:\n%s", feature_importance.head(preview_count).to_string(index=False))
 
 

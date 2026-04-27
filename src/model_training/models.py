@@ -20,32 +20,67 @@ MODELS = {
 }
 
 ACCELERATOR_CACHE = {}
+DEFAULT_ACCELERATOR = "gpu"
+FALLBACK_ACCELERATOR = "cpu"
+RETRY_FAILURE_KEYWORDS = [
+    "gpu",
+    "cuda",
+    "opencl",
+    "driver",
+    "device",
+    "not compiled",
+    "not supported",
+    "no kernel image",
+    "cuda error",
+    "catboost/libs/train_lib",
+]
+
+ACCELERATOR_PARAMS = {
+    "catboost": {
+        "gpu": {"task_type": "GPU"},
+        "cpu": {"task_type": "CPU", "thread_count": -1},
+    },
+    "lightgbm": {
+        "gpu": {"device_type": "gpu"},
+        "cpu": {"device_type": "cpu", "n_jobs": -1},
+    },
+    "xgboost": {
+        "gpu": {"tree_method": "hist", "device": "cuda"},
+        "cpu": {"tree_method": "hist", "device": "cpu", "n_jobs": -1},
+    },
+}
+
+CLASS_WEIGHT_PARAMS = {
+    "catboost": {"auto_class_weights": "Balanced"},
+    "lightgbm": {"is_unbalance": True},
+    "xgboost": {"scale_pos_weight": 11.3},
+}
+
+CATBOOST_TRIAL_VERBOSE = 0
+CATBOOST_FINAL_VERBOSE = 50
+LIGHTGBM_VERBOSITY = -1
 
 
 def get_acceleration_config(config):
-    return config["training"].get("acceleration", {})
+    return {"preferred": config["training"].get("accelerator", DEFAULT_ACCELERATOR), "fallback": FALLBACK_ACCELERATOR}
 
 
 def get_accelerator_order(config):
     acceleration_config = get_acceleration_config(config)
     preferred = acceleration_config.get("preferred", "cpu")
     fallback = acceleration_config.get("fallback", "cpu")
-    retry = acceleration_config.get("retry_on_failure", True)
-    if retry and fallback != preferred:
+    if fallback != preferred:
         return [preferred, fallback]
     return [preferred]
 
 
 def get_accelerator_params(model_name, config, accelerator):
-    acceleration_config = get_acceleration_config(config)
-    model_config = acceleration_config.get("models", {}).get(model_name, {})
-    return model_config.get(f"{accelerator}_params", {}).copy()
+    return ACCELERATOR_PARAMS.get(model_name, {}).get(accelerator, {}).copy()
 
 
 def accelerator_failure_is_retryable(error, config):
     message = str(error).lower()
-    keywords = get_acceleration_config(config).get("retry_failure_keywords", [])
-    return any(keyword.lower() in message for keyword in keywords)
+    return any(keyword.lower() in message for keyword in RETRY_FAILURE_KEYWORDS)
 
 
 def get_imbalance_config(config):
@@ -86,14 +121,13 @@ def merge_model_params(name, params, config, is_trial=True, accelerator=None):
 
     imbalance_config = get_imbalance_config(config)
     if imbalance_config["strategy"] == "class_weight":
-        model_params.update(imbalance_config.get("class_weight_params", {}).get(name, {}))
+        model_params.update(CLASS_WEIGHT_PARAMS.get(name, {}))
 
     if name == "catboost":
-        verbosity = config["training"]["verbosity"]
-        verbosity_key = "catboost_trial" if is_trial else "catboost_final"
-        model_params.setdefault("verbose", verbosity.get(verbosity_key, 0))
+        verbose = CATBOOST_TRIAL_VERBOSE if is_trial else CATBOOST_FINAL_VERBOSE
+        model_params.setdefault("verbose", verbose)
     elif name == "lightgbm":
-        model_params.setdefault("verbosity", config["training"]["verbosity"].get("lgbm", -1))
+        model_params.setdefault("verbosity", LIGHTGBM_VERBOSITY)
 
     return model_params
 

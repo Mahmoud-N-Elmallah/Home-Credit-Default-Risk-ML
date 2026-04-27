@@ -5,7 +5,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from src.common.artifacts import model_artifact_path
+from src.common.artifacts import model_artifact_path, training_artifact_relative_path
 from src.common.config_io import resolve_project_path
 from src.common.logging import configure_logging
 from src.common.schema import clean_column_names, expected_preprocessor_input_columns
@@ -110,10 +110,9 @@ def run_inference(
 ):
     experiment_dir = experiment_path(config, experiment_dir_arg)
     configure_logging(experiment_dir / "logs", "inference.log")
-    artifact_paths = config["training"]["artifact_paths"]
 
-    model_path = experiment_dir / artifact_paths["single_model"]
-    preprocessor_path = experiment_dir / artifact_paths["preprocessor"]
+    model_path = experiment_dir / training_artifact_relative_path("single_model")
+    preprocessor_path = experiment_dir / training_artifact_relative_path("preprocessor")
     if not model_path.exists():
         raise FileNotFoundError(f"Model artifact not found: {model_path}")
     if not preprocessor_path.exists():

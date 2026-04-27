@@ -4,6 +4,7 @@ import logging
 import polars as pl
 import yaml
 
+from src.common.artifacts import training_artifact_relative_path, training_models_dir
 from src.data_processing.constants import SCHEMA_OVERRIDES
 
 
@@ -87,14 +88,12 @@ def write_feature_manifest(train: pl.DataFrame, test: pl.DataFrame, config, clea
 
 
 def latest_submission_path(config):
-    artifact_paths = config["training"]["artifact_paths"]
-    models_dir = Path(artifact_paths["models_dir"])
-    latest_path = Path(artifact_paths.get("latest_experiment", "latest_experiment.txt"))
-    if not latest_path.is_absolute():
-        latest_path = models_dir / latest_path
+    models_dir = training_models_dir(config)
+    latest_path = training_artifact_relative_path("latest_experiment")
+    latest_path = latest_path if latest_path.is_absolute() else models_dir / latest_path
     if not latest_path.exists():
         return None
 
     experiment_dir = Path(latest_path.read_text(encoding="utf-8").strip())
-    submission_path = Path(artifact_paths["submission"])
+    submission_path = training_artifact_relative_path("submission")
     return submission_path if submission_path.is_absolute() else experiment_dir / submission_path

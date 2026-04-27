@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from src.common.artifacts import model_artifact_path
+from src.common.artifacts import model_artifact_path, training_artifact_relative_path
 from src.model_training.config import get_primary_estimator_config, primary_model_name
 
 
@@ -95,8 +95,8 @@ def base_params(config):
         "phases.validate": training["phases"]["validate"],
         "phases.final_fit": training["phases"]["final_fit"],
         "threshold_objective": training["threshold_tuning"]["objective"],
-        "accelerator_preferred": training["acceleration"]["preferred"],
-        "accelerator_fallback": training["acceleration"]["fallback"],
+        "accelerator_preferred": training.get("accelerator", "gpu"),
+        "accelerator_fallback": "cpu",
         "preprocessing.scaler": training["preprocessing"]["scaler"],
         "preprocessing.imbalance.strategy": training["preprocessing"]["imbalance"]["strategy"],
         "feature_selection.enabled_during_search": training["preprocessing"]["feature_selection"]["enabled_during_search"],
@@ -146,7 +146,6 @@ class MlflowTracker:
             self.mlflow.log_metrics(flattened)
 
     def _log_artifacts(self):
-        artifact_paths = self.config["training"]["artifact_paths"]
         keys = [
             "config_snapshot",
             "best_params",
@@ -164,8 +163,6 @@ class MlflowTracker:
             keys.extend(["single_model", "preprocessor"])
 
         for key in keys:
-            if key not in artifact_paths:
-                continue
             path = model_artifact_path(self.models_dir, self.config, key, model_name=primary_model_name(self.config))
             if path.exists() and path.is_file():
                 artifact_path = None
@@ -173,7 +170,7 @@ class MlflowTracker:
                     artifact_path = str(path.parent.relative_to(self.models_dir))
                 self.mlflow.log_artifact(str(path), artifact_path=artifact_path)
 
-        metadata_path = self.models_dir / self.config["training"]["artifact_reuse"]["metadata"]
+        metadata_path = self.models_dir / training_artifact_relative_path("run_metadata")
         if metadata_path.exists():
             self.mlflow.log_artifact(str(metadata_path))
 

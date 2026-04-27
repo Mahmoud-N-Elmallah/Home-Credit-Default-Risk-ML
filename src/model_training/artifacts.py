@@ -6,7 +6,7 @@ import shutil
 
 import yaml
 
-from src.common.artifacts import model_artifact_path
+from src.common.artifacts import model_artifact_path, training_artifact_relative_path
 from src.model_training.config import primary_model_name
 
 
@@ -56,7 +56,7 @@ def create_experiment_dir(models_root, config):
 
 
 def write_latest_experiment_pointer(models_root, config, experiment_dir):
-    latest_path = Path(config["training"]["artifact_paths"]["latest_experiment"])
+    latest_path = training_artifact_relative_path("latest_experiment")
     if not latest_path.is_absolute():
         latest_path = models_root / latest_path
     latest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,8 +70,7 @@ def save_config_snapshot(experiment_dir, config):
 
 
 def metadata_path(models_dir, config):
-    metadata_name = config["training"]["artifact_reuse"]["metadata"]
-    path = Path(metadata_name)
+    path = training_artifact_relative_path("run_metadata")
     return path if path.is_absolute() else models_dir / path
 
 
@@ -106,7 +105,7 @@ def build_run_metadata(config, X, y, train_path, experiment_id, timestamp):
 
 
 def write_run_metadata(models_dir, config, metadata):
-    metadata_file_name = config["training"]["artifact_reuse"]["metadata"]
+    metadata_file_name = training_artifact_relative_path("run_metadata").name
     artifact_list = [
         str(path.relative_to(models_dir)).replace("\\", "/")
         for path in models_dir.rglob("*")

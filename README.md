@@ -3,7 +3,7 @@
 Machine-learning pipeline for [**Home Credit Default Risk**](https://www.kaggle.com/c/home-credit-default-risk).
 It builds customer-level features from raw Home Credit tables, trains a configured model, evaluates with out-of-fold validation, and writes a Kaggle submission CSV.
 
-Results: **0.79074 public leaderboard ROC AUC** .
+Results: **0.792 public leaderboard ROC AUC** .
 
 ## Pipeline
 
@@ -81,7 +81,9 @@ If preprocessing config changes, run `run.step=process` before training so
 
 ## Training Controls
 
-Main runtime controls live in `conf/config.yaml`. 
+Main runtime controls live in `conf/config.yaml`: model choice, training budget,
+preprocessing strategy, MLflow settings, DVC experiment name, and data paths.
+Fixed artifact names, plot styling, and GPU fallback policy live in code.
 
 Faster smoke run:
 
@@ -148,9 +150,9 @@ tracking, or disable tracking for local-only runs with
 
 ## Config
 
-`conf/config.yaml` is the Hydra source of truth for runtime paths, training
-controls, tracking settings, model settings, artifact names, and
-analysis/inference defaults.
+`conf/config.yaml` is the Hydra source of truth for values expected to change
+between runs. Fixed Kaggle schema, artifact filenames, plot styling, report
+formatting, and accelerator fallback behavior live in code constants.
 
 Fixed Kaggle schema, source column names, engineered feature names, and
 aggregation specs live in `src/data_processing/constants.py`. Historical

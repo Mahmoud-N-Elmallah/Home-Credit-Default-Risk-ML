@@ -21,6 +21,18 @@ class HydraConfigTest(unittest.TestCase):
         self.assertNotIn("recency_months", feature_config)
         self.assertNotIn("aggregations", config["pipeline"])
 
+    def test_fixed_runtime_details_are_not_configured(self):
+        config = load_hydra_config()
+        training = config["training"]
+        shap_config = config["analysis"]["shap"]
+
+        self.assertNotIn("acceleration", training)
+        self.assertNotIn("evaluation", training)
+        self.assertNotIn("reports", training)
+        self.assertNotIn("verbosity", training)
+        self.assertEqual(list(training["artifact_paths"].keys()), ["models_dir"])
+        self.assertEqual(set(shap_config.keys()), {"sample_size", "top_n"})
+
 
 if __name__ == "__main__":
     unittest.main()

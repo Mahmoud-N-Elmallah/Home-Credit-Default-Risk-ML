@@ -17,19 +17,13 @@ def tracking_config(enabled=False):
             "cv_shuffle": True,
             "phases": {"search": True, "validate": True, "final_fit": True},
             "threshold_tuning": {"objective": "f1"},
-            "acceleration": {"preferred": "gpu", "fallback": "cpu"},
+            "accelerator": "gpu",
             "preprocessing": {
                 "scaler": "robust",
                 "imbalance": {"strategy": "class_weight"},
                 "feature_selection": {"enabled_during_search": False, "max_features": 150},
             },
-            "artifact_reuse": {"metadata": "training_run_metadata.yaml"},
-            "artifact_paths": {
-                "config_snapshot": "config_snapshot.yaml",
-                "metrics": "reports/metrics.yaml",
-                "single_model": "final_model.pkl",
-                "preprocessor": "training_preprocessor.pkl",
-            },
+            "artifact_reuse": {},
             "models": {
                 "primary": "catboost",
                 "candidates": [{"name": "catboost", "params": {"depth": 6}}],

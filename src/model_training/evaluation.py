@@ -19,6 +19,17 @@ from sklearn.metrics import (
 from src.common.artifacts import model_artifact_path
 
 
+REPORT_DIGITS = 4
+CONFUSION_MATRIX_FIGSIZE = (6, 5)
+CONFUSION_MATRIX_CMAP = "Blues"
+ROC_CURVE_FIGSIZE = (6, 5)
+FEATURE_IMPORTANCE_TOP_N = 50
+FEATURE_IMPORTANCE_FIG_WIDTH = 8
+FEATURE_IMPORTANCE_MIN_HEIGHT = 4
+FEATURE_IMPORTANCE_MAX_HEIGHT = 12
+FEATURE_IMPORTANCE_HEIGHT_PER_FEATURE = 0.22
+
+
 def calculate_metric(y_true, y_pred_prob, metric_name, threshold):
     if metric_name == "roc_auc":
         return roc_auc_score(y_true, y_pred_prob)
@@ -45,29 +56,23 @@ def model_feature_importances(model, model_name, feature_names):
 
 
 def save_feature_importance(model, model_name, feature_names, models_dir, config):
-    reports_config = config["training"]["reports"]
-    if not reports_config.get("save_feature_importance", False):
-        return
-
     frame = model_feature_importances(model, model_name, feature_names)
     frame.to_csv(model_artifact_path(models_dir, config, "feature_importance"), index=False)
 
-    top_n = int(reports_config["feature_importance_top_n"])
-    top = frame.head(top_n).sort_values("importance", ascending=True)
+    top = frame.head(FEATURE_IMPORTANCE_TOP_N).sort_values("importance", ascending=True)
     if top.empty:
         return
-    eval_config = config["training"]["evaluation"]
     height = max(
-        float(eval_config["feature_importance_min_height"]),
+        FEATURE_IMPORTANCE_MIN_HEIGHT,
         min(
-            float(eval_config["feature_importance_max_height"]),
-            float(eval_config["feature_importance_height_per_feature"]) * len(top),
+            FEATURE_IMPORTANCE_MAX_HEIGHT,
+            FEATURE_IMPORTANCE_HEIGHT_PER_FEATURE * len(top),
         ),
     )
-    plt.figure(figsize=(float(eval_config["feature_importance_fig_width"]), height))
+    plt.figure(figsize=(FEATURE_IMPORTANCE_FIG_WIDTH, height))
     plt.barh(top["feature"], top["importance"])
     plt.xlabel("Importance")
-    plt.title(f"Top {min(top_n, len(frame))} Feature Importances: {model_name}")
+    plt.title(f"Top {min(FEATURE_IMPORTANCE_TOP_N, len(frame))} Feature Importances: {model_name}")
     plt.tight_layout()
     plt.savefig(model_artifact_path(models_dir, config, "feature_importance_plot"))
     plt.close()
@@ -124,13 +129,9 @@ def choose_threshold(y_true, y_pred_prob, config, evaluation_scope):
 
 
 def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, model_name, models_dir, config, evaluation_scope):
-    if not config["training"]["reports"]["save_curves"]:
-        return
-
-    eval_config = config["training"]["evaluation"]
     cm = confusion_matrix(y_true, y_pred_bin)
-    plt.figure(figsize=tuple(eval_config["confusion_matrix_figsize"]))
-    sns.heatmap(cm, annot=True, fmt="d", cmap=eval_config["confusion_matrix_cmap"])
+    plt.figure(figsize=CONFUSION_MATRIX_FIGSIZE)
+    sns.heatmap(cm, annot=True, fmt="d", cmap=CONFUSION_MATRIX_CMAP)
     plt.title(f"Confusion Matrix: {model_name} ({evaluation_scope})")
     plt.ylabel("Actual")
     plt.xlabel("Predicted")
@@ -139,7 +140,7 @@ def save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, model_name, models_di
     plt.close()
 
     fpr, tpr, _ = roc_curve(y_true, y_pred_prob)
-    plt.figure(figsize=tuple(eval_config["roc_curve_figsize"]))
+    plt.figure(figsize=ROC_CURVE_FIGSIZE)
     plt.plot(fpr, tpr)
     plt.plot([0, 1], [0, 1], linestyle="--")
     plt.xlabel("False Positive Rate")
@@ -155,8 +156,6 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     if evaluation_scope not in allowed_scopes:
         raise ValueError(f"Invalid evaluation scope: {evaluation_scope}")
 
-    t_config = config["training"]
-    eval_config = t_config["evaluation"]
     threshold_info, threshold_table = choose_threshold(y_true, y_pred_prob, config, evaluation_scope)
     threshold = threshold_info["threshold"]
     y_pred_bin = (y_pred_prob > threshold).astype(int)
@@ -191,7 +190,7 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
     report_str += f"Accuracy: {metrics['threshold_metrics']['accuracy']:.4f}\n"
     report_str += "Submission Note: Kaggle submission uses probabilities, not thresholded labels.\n\n"
     report_str += "Classification Report:\n"
-    report_str += classification_report(y_true, y_pred_bin, digits=eval_config["report_digits"], zero_division=0)
+    report_str += classification_report(y_true, y_pred_bin, digits=REPORT_DIGITS, zero_division=0)
 
     models_dir.mkdir(parents=True, exist_ok=True)
     model_artifact_path(models_dir, config, "evaluation_report").write_text(report_str, encoding="utf-8")
@@ -199,7 +198,6 @@ def save_evaluation_report(y_true, y_pred_prob, model_name, models_dir, config, 
         yaml.safe_dump(metrics, file, sort_keys=False)
     with open(model_artifact_path(models_dir, config, "threshold"), "w", encoding="utf-8") as file:
         yaml.safe_dump(threshold_info, file, sort_keys=False)
-    if config["training"]["reports"]["save_threshold_table"]:
-        threshold_table.to_csv(model_artifact_path(models_dir, config, "threshold_table"), index=False)
+    threshold_table.to_csv(model_artifact_path(models_dir, config, "threshold_table"), index=False)
     save_diagnostic_plots(y_true, y_pred_prob, y_pred_bin, model_name, models_dir, config, evaluation_scope)
     return threshold_info

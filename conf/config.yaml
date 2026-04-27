@@ -82,30 +82,6 @@ analysis:
   shap:
     sample_size: 5000
     top_n: 30
-    metadata_preview_limit: 20
-    console_preview_limit: 10
-    reports:
-      feature_importance: "reports/shap_feature_importance.csv"
-      metadata: "reports/shap_metadata.yaml"
-    plots:
-      summary_bar: "plots/shap_summary_bar.png"
-      beeswarm: "plots/shap_beeswarm_top.png"
-    plot:
-      dpi: 160
-      bar_fig_width: 10
-      bar_fig_min_height: 6
-      bar_height_per_feature: 0.28
-      bar_color: "#4c78a8"
-      beeswarm_fig_width: 11
-      beeswarm_fig_min_height: 7
-      beeswarm_height_per_feature: 0.3
-      beeswarm_jitter: 0.28
-      beeswarm_marker_size: 8
-      beeswarm_alpha: 0.55
-      beeswarm_cmap: "coolwarm"
-      beeswarm_value_percentiles: [ 1, 99 ]
-      zero_line_color: "#333333"
-      zero_line_width: 1
 
 inference:
   input_path:
@@ -127,13 +103,13 @@ training:
   optuna_n_trials: 10
   optuna_subsample_rate: 0.35
   run_full_oof_validation: true
+  accelerator: "gpu"
   phases:
     search: true
     validate: true
     final_fit: true
   artifact_reuse:
     allow_stale_artifacts: false
-    metadata: "training_run_metadata.yaml"
   experiment:
     name:
     folder_template: "{timestamp}_{primary_model}"
@@ -145,97 +121,19 @@ training:
       min: 0.01
       max: 0.99
       step: 0.01
-  reports:
-    save_threshold_table: true
-    save_curves: true
-    save_feature_importance: true
-    feature_importance_top_n: 50
-  acceleration:
-    preferred: "gpu"
-    fallback: "cpu"
-    retry_on_failure: true
-    retry_failure_keywords:
-      - "gpu"
-      - "cuda"
-      - "opencl"
-      - "driver"
-      - "device"
-      - "not compiled"
-      - "not supported"
-      - "no kernel image"
-      - "cuda error"
-      - "catboost/libs/train_lib"
-    models:
-      catboost:
-        gpu_params:
-          task_type: "GPU"
-        cpu_params:
-          task_type: "CPU"
-          thread_count: -1
-      lightgbm:
-        gpu_params:
-          device_type: "gpu"
-        cpu_params:
-          device_type: "cpu"
-          n_jobs: -1
-      xgboost:
-        gpu_params:
-          tree_method: "hist"
-          device: "cuda"
-        cpu_params:
-          tree_method: "hist"
-          device: "cpu"
-          n_jobs: -1
   optimization_metric: "roc_auc"
   cv_shuffle: true
   classification_threshold: 0.5
   optuna_direction: "maximize"
 
-  verbosity:
-    catboost_trial: 0
-    catboost_final: 50
-    lgbm: -1
-    optuna: "INFO"
-
   artifact_paths:
     models_dir: "Models"
-    latest_experiment: "latest_experiment.txt"
-    config_snapshot: "config_snapshot.yaml"
-    submission: "submission.csv"
-    preprocessor: "training_preprocessor.pkl"
-    threshold: "threshold.yaml"
-    best_params: "best_params.yaml"
-    single_model: "final_model.pkl"
-    evaluation_report: "reports/evaluation_report.txt"
-    metrics: "reports/metrics.yaml"
-    threshold_table: "reports/threshold_table.csv"
-    feature_importance: "reports/feature_importance.csv"
-    feature_importance_plot: "plots/feature_importance_top.png"
-    confusion_matrix: "plots/confusion_matrix.png"
-    roc_curve: "plots/roc_curve.png"
-
-  evaluation:
-    report_digits: 4
-    confusion_matrix_figsize: [ 6, 5 ]
-    confusion_matrix_cmap: "Blues"
-    roc_curve_figsize: [ 6, 5 ]
-    feature_importance_fig_width: 8
-    feature_importance_min_height: 4
-    feature_importance_max_height: 12
-    feature_importance_height_per_feature: 0.22
 
   preprocessing:
     scaler: "robust"
     imbalance:
       strategy: "class_weight"
       sampler_params: { }
-      class_weight_params:
-        catboost:
-          auto_class_weights: "Balanced"
-        lightgbm:
-          is_unbalance: true
-        xgboost:
-          scale_pos_weight: 11.3
     feature_selection:
       method: "lgbm"
       max_features: 150

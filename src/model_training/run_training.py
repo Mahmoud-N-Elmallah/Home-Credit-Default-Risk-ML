@@ -5,7 +5,7 @@ import joblib
 import optuna
 import pandas as pd
 
-from src.common.artifacts import model_artifact_path
+from src.common.artifacts import model_artifact_path, training_models_dir
 from src.common.logging import configure_logging
 from src.common.schema import clean_column_names
 from src.model_training.artifacts import (
@@ -28,32 +28,25 @@ from src.model_training.tracking import tracking_run
 
 
 logger = logging.getLogger(__name__)
+OPTUNA_VERBOSITY = optuna.logging.INFO
 
 
-def configure_optuna_logging(config):
-    level_name = str(config["training"]["verbosity"].get("optuna", "INFO")).upper()
-    levels = {
-        "DEBUG": optuna.logging.DEBUG,
-        "INFO": optuna.logging.INFO,
-        "WARNING": optuna.logging.WARNING,
-        "ERROR": optuna.logging.ERROR,
-        "CRITICAL": optuna.logging.CRITICAL,
-    }
-    optuna.logging.set_verbosity(levels.get(level_name, optuna.logging.INFO))
+def configure_optuna_logging():
+    optuna.logging.set_verbosity(OPTUNA_VERBOSITY)
 
 
 def run_training(config):
     logger.info("Initializing training pipeline...")
     t_config = config["training"]
     seed = config["globals"]["random_state"]
-    models_root = Path(t_config["artifact_paths"]["models_dir"])
+    models_root = training_models_dir(config)
     models_root.mkdir(parents=True, exist_ok=True)
     models_dir, experiment_id, timestamp = create_experiment_dir(models_root, config)
     training_log = configure_logging(models_dir / "logs", "training.log")
     save_config_snapshot(models_dir, config)
     logger.info("Experiment artifacts: %s", models_dir)
     logger.info("Training log: %s", training_log)
-    configure_optuna_logging(config)
+    configure_optuna_logging()
 
     train_path = Path(config["data"]["final"]["train"])
     test_path = Path(config["data"]["final"]["test"])
