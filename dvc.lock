@@ -14,13 +14,13 @@ stages:
       size: 1356
     - path: src/common
       hash: md5
-      md5: 775aedbb6792d5d75ac58897a6678902.dir
-      size: 3645
+      md5: 7d4ac528c730d36f856750125ad2c50b.dir
+      size: 4832
       nfiles: 5
     - path: src/data_processing
       hash: md5
-      md5: b1329d2184fa79eb622e7a5c79151a67.dir
-      size: 57413
+      md5: 5158fa22bd9e9a9804809f1ea13c6b23.dir
+      size: 57419
       nfiles: 7
     params:
       conf/config.yaml:
@@ -100,13 +100,13 @@ stages:
       size: 1356
     - path: src/common
       hash: md5
-      md5: 775aedbb6792d5d75ac58897a6678902.dir
-      size: 3645
+      md5: 7d4ac528c730d36f856750125ad2c50b.dir
+      size: 4832
       nfiles: 5
     - path: src/model_training
       hash: md5
-      md5: 86ec7787c6e93344322c2a13e0f7617b.dir
-      size: 47502
+      md5: d7b51cf5590e702a6a573135d66655f1.dir
+      size: 47191
       nfiles: 9
     params:
       conf/config.yaml:
@@ -132,13 +132,13 @@ stages:
           optuna_n_trials: 10
           optuna_subsample_rate: 0.35
           run_full_oof_validation: true
+          accelerator: gpu
           phases:
             search: true
             validate: true
             final_fit: true
           artifact_reuse:
             allow_stale_artifacts: false
-            metadata: training_run_metadata.yaml
           experiment:
             name:
             folder_template: '{timestamp}_{primary_model}'
@@ -150,97 +150,17 @@ stages:
               min: 0.01
               max: 0.99
               step: 0.01
-          reports:
-            save_threshold_table: true
-            save_curves: true
-            save_feature_importance: true
-            feature_importance_top_n: 50
-          acceleration:
-            preferred: gpu
-            fallback: cpu
-            retry_on_failure: true
-            retry_failure_keywords:
-            - gpu
-            - cuda
-            - opencl
-            - driver
-            - device
-            - not compiled
-            - not supported
-            - no kernel image
-            - cuda error
-            - catboost/libs/train_lib
-            models:
-              catboost:
-                gpu_params:
-                  task_type: GPU
-                cpu_params:
-                  task_type: CPU
-                  thread_count: -1
-              lightgbm:
-                gpu_params:
-                  device_type: gpu
-                cpu_params:
-                  device_type: cpu
-                  n_jobs: -1
-              xgboost:
-                gpu_params:
-                  tree_method: hist
-                  device: cuda
-                cpu_params:
-                  tree_method: hist
-                  device: cpu
-                  n_jobs: -1
           optimization_metric: roc_auc
           cv_shuffle: true
           classification_threshold: 0.5
           optuna_direction: maximize
-          verbosity:
-            catboost_trial: 0
-            catboost_final: 50
-            lgbm: -1
-            optuna: INFO
           artifact_paths:
             models_dir: Models
-            latest_experiment: latest_experiment.txt
-            config_snapshot: config_snapshot.yaml
-            submission: submission.csv
-            preprocessor: training_preprocessor.pkl
-            threshold: threshold.yaml
-            best_params: best_params.yaml
-            single_model: final_model.pkl
-            evaluation_report: reports/evaluation_report.txt
-            metrics: reports/metrics.yaml
-            threshold_table: reports/threshold_table.csv
-            feature_importance: reports/feature_importance.csv
-            feature_importance_plot: plots/feature_importance_top.png
-            confusion_matrix: plots/confusion_matrix.png
-            roc_curve: plots/roc_curve.png
-          evaluation:
-            report_digits: 4
-            confusion_matrix_figsize:
-            - 6
-            - 5
-            confusion_matrix_cmap: Blues
-            roc_curve_figsize:
-            - 6
-            - 5
-            feature_importance_fig_width: 8
-            feature_importance_min_height: 4
-            feature_importance_max_height: 12
-            feature_importance_height_per_feature: 0.22
           preprocessing:
             scaler: robust
             imbalance:
               strategy: class_weight
               sampler_params: {}
-              class_weight_params:
-                catboost:
-                  auto_class_weights: Balanced
-                lightgbm:
-                  is_unbalance: true
-                xgboost:
-                  scale_pos_weight: 11.3
             feature_selection:
               method: lgbm
               max_features: 150
@@ -350,53 +270,53 @@ stages:
       size: 97
     - path: Models/dvc_train/config_snapshot.yaml
       hash: md5
-      md5: 915fa4976df0b782d0be1c3a2bf2acf6
-      size: 8389
+      md5: 5a7266acb7f630d0c94b28289c3f5226
+      size: 5475
     - path: Models/dvc_train/final_model.pkl
       hash: md5
-      md5: d517cf68a342c6829f38bbcb89dfb506
-      size: 791040
+      md5: 5c92e97477a93550ca3d6cb1d816c872
+      size: 811528
     - path: Models/dvc_train/plots/confusion_matrix.png
       hash: md5
-      md5: 530a93ecbbbf7ac016989dd9dc1cec8a
-      size: 20967
+      md5: 8086f485a7494593d98adc819c58c2a0
+      size: 20969
     - path: Models/dvc_train/plots/feature_importance_top.png
       hash: md5
-      md5: 29b74b1c8d4b08c6eeac0dbd3b6cb83d
-      size: 127113
+      md5: b32bb04411d1bf4c94622a1d3bab819c
+      size: 126544
     - path: Models/dvc_train/plots/roc_curve.png
       hash: md5
-      md5: 28925ebf388fd4b5110213decef09e76
-      size: 30444
+      md5: 1c3f311c46e446beedf7dbb8e2cee0c4
+      size: 30442
     - path: Models/dvc_train/reports/evaluation_report.txt
       hash: md5
-      md5: 1290367565f089b529ad2c5346d7c5c4
+      md5: bc55be5070fbef8903945148ba14f4a5
       size: 777
     - path: Models/dvc_train/reports/feature_importance.csv
       hash: md5
-      md5: 3af7f19b6a0f4da1d7f774f42b6ecd7e
-      size: 7029
+      md5: eb3418431fbb8be5336a7f4fed958b50
+      size: 7002
     - path: Models/dvc_train/reports/metrics.yaml
       hash: md5
-      md5: f6e09131edd5bc21bcabe6dac2ff3243
+      md5: 8071a160ed729d2b316b1b4ce7f03d1b
       size: 414
     - path: Models/dvc_train/reports/threshold_table.csv
       hash: md5
-      md5: be9c2720786b032b1a4c68b98c00ce8a
-      size: 8234
+      md5: e4689037f4f22c048b882bbc6a55e378
+      size: 8181
     - path: Models/dvc_train/submission.csv
       hash: md5
-      md5: d097d9a01e938451463b27f7d03dd202
-      size: 1334928
+      md5: 8114a3c09a1118d534f79ce6c248244e
+      size: 1335068
     - path: Models/dvc_train/threshold.yaml
       hash: md5
-      md5: a2726bf3fb4922f97d114a52a3dd3945
-      size: 80
+      md5: 43d58be098966a60f87e080d0266c967
+      size: 79
     - path: Models/dvc_train/training_preprocessor.pkl
       hash: md5
-      md5: 4f15804ab258f5fc80734a41339f1860
-      size: 857104
+      md5: e38eaeb27b6f682561c8d242dfa4a11a
+      size: 854747
     - path: Models/dvc_train/training_run_metadata.yaml
       hash: md5
-      md5: 943f356ef8579ce04e6d6eeb9b07bf0d
-      size: 1102
+      md5: e6b41bb2b06e890c2ea59a669bb601a2
+      size: 1101
