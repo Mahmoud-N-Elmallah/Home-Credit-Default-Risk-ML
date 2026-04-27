@@ -10,10 +10,12 @@ from omegaconf import DictConfig, OmegaConf
 sys.path.append(str(Path(__file__).parent))
 from src.common.logging import configure_logging
 from src.data_processing.run_pipeline import run_pipeline
+from src.download_data import download_raw_data
 from src.model_training.run_training import run_training
 
 
 logger = logging.getLogger(__name__)
+VALID_STEPS = {"download", "process", "train", "all"}
 
 
 def configure_hydra_run_logging():
@@ -21,14 +23,22 @@ def configure_hydra_run_logging():
     return configure_logging(Path(hydra_dir) / "logs", "pipeline.log")
 
 
+def validate_step(step):
+    if step not in VALID_STEPS:
+        expected = ", ".join(sorted(VALID_STEPS))
+        raise ValueError(f"Invalid run.step: {step}. Expected one of: {expected}.")
+    return step
+
+
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig):
     log_path = configure_hydra_run_logging()
     config = OmegaConf.to_container(cfg, resolve=True)
-    step = config.get("run", {}).get("step", "all")
+    step = validate_step(config.get("run", {}).get("step", "all"))
 
-    if step not in {"process", "train", "all"}:
-        raise ValueError(f"Invalid run.step: {step}. Expected one of: process, train, all.")
+    if step in {"download", "all"}:
+        logger.info("Starting Raw Data Download")
+        download_raw_data(config)
 
     if step in {"process", "all"}:
         logger.info("Starting Data Processing Pipeline")

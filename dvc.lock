@@ -328,3 +328,31 @@ stages:
       hash: md5
       md5: f9d393f8b8966952c20d6ecc023258fc
       size: 1099
+  download:
+    cmd: uv run python main.py run.step=download
+    deps:
+    - path: main.py
+      hash: md5
+      md5: 500675d91bf3d04eefff0df2054a14b3
+      size: 1661
+    - path: src/download_data.py
+      hash: md5
+      md5: cce3b055eef5ffa57da55bc4a86b3b5e
+      size: 4353
+    params:
+      conf/config.yaml:
+        data.raw:
+          application_train: Data/Raw/application_train.csv
+          application_test: Data/Raw/application_test.csv
+          bureau: Data/Raw/bureau.csv
+          bureau_balance: Data/Raw/bureau_balance.csv
+          previous_application: Data/Raw/previous_application.csv
+          pos_cash_balance: Data/Raw/POS_CASH_balance.csv
+          installments_payments: Data/Raw/installments_payments.csv
+          credit_card_balance: Data/Raw/credit_card_balance.csv
+    outs:
+    - path: Data/Raw
+      hash: md5
+      md5: be145c3854454ad97fd16454f9aed966.dir
+      size: 2684261617
+      nfiles: 10

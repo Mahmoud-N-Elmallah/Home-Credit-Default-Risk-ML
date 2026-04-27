@@ -1,4 +1,16 @@
 stages:
+  download:
+    cmd: uv run python main.py run.step=download
+    deps:
+      - main.py
+      - src/download_data.py
+    params:
+      - conf/config.yaml:
+          - data.raw
+    outs:
+      - Data/Raw:
+          persist: true
+
   process:
     cmd: uv run python main.py run.step=process
     deps:

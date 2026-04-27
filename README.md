@@ -9,9 +9,11 @@ Results: **0.792 public leaderboard ROC AUC** .
 
 ![Project pipeline diagram](docs/project_pipeline_diagram.svg)
 
-1. **Process data**: read raw Kaggle CSVs, build application/bureau/history
+1. **Download data**: ensure the Kaggle competition CSVs exist under
+   `Data/Raw/`.
+2. **Process data**: read raw Kaggle CSVs, build application/bureau/history
    features, align train/test, and write `Data/final/`.
-2. **Train model**: tune the primary model, validate with OOF metrics, tune
+3. **Train model**: tune the primary model, validate with OOF metrics, tune
    report thresholds, fit the final model, and write artifacts under
    `Models/<experiment_id>/`.
 
@@ -29,7 +31,18 @@ Dependencies are declared in `pyproject.toml` and locked in `uv.lock`.
 
 ## Data
 
-Place Kaggle raw files under `Data/Raw/`:
+Raw data comes from the Kaggle
+[Home Credit Default Risk](https://www.kaggle.com/c/home-credit-default-risk)
+competition. Configure Kaggle credentials with `~/.kaggle/kaggle.json` or
+`KAGGLE_USERNAME` / `KAGGLE_KEY`, and accept the competition rules on Kaggle.
+
+Then run:
+
+```powershell
+uv run python main.py run.step=download
+```
+
+This no-ops when all expected raw files already exist under `Data/Raw/`:
 
 ```text
 application_train.csv
@@ -57,19 +70,24 @@ The reproducible process/train pipeline is defined in `dvc.yaml`:
 uv run dvc repro
 ```
 
+The DVC order is `download -> process -> train`.
+
 Data validation runs during `process` and writes
 `Data/final/validation_report.yaml`.
 
 ## Run
 
 ```powershell
+# download raw data if missing
+uv run python main.py run.step=download
+
 # process raw data
 uv run python main.py run.step=process
 
 # train and generate submission
 uv run python main.py run.step=train
 
-# run both stages
+# run download, process, and train
 uv run python main.py run.step=all
 ```
 

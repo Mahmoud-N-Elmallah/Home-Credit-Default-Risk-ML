@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="620" viewBox="0 0 1600 620" role="img" aria-labelledby="title desc">
   <title id="title">Home Credit Default Risk ML Project Pipeline</title>
-  <desc id="desc">Diagram showing raw Kaggle tables flowing through processing, feature engineering, Optuna CatBoost training, OOF evaluation, and final artifacts.</desc>
+  <desc id="desc">Diagram showing Kaggle download, raw tables, processing, feature engineering, Optuna CatBoost training, OOF evaluation, and final artifacts.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L9,3 L0,6 Z" fill="#f2f2f2"/>
@@ -23,9 +23,9 @@
 
   <g transform="translate(20 230)">
     <rect class="box" x="0" y="0" width="170" height="130" rx="5"/>
-    <text class="title" x="85" y="30" text-anchor="middle">Raw Kaggle Data</text>
+    <text class="title" x="85" y="30" text-anchor="middle">Kaggle Download</text>
     <line class="line" x1="0" y1="50" x2="170" y2="50"/>
-    <text class="small" x="14" y="74">- application train/test</text>
+    <text class="small" x="14" y="74">- raw train/test CSVs</text>
     <text class="small" x="14" y="94">- bureau + balance</text>
     <text class="small" x="14" y="114">- previous, POS, inst, CC</text>
   </g>

@@ -13,6 +13,7 @@ dependencies = [
     "imbalanced-learn>=0.14.1",
     "ipykernel>=7.2.0",
     "joblib>=1.5.3",
+    "kaggle>=2.1.0",
     "lightgbm>=4.6.0",
     "matplotlib>=3.10.8",
     "missingno>=0.5.2",
