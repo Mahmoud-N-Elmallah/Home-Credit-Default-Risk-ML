@@ -1,13 +1,9 @@
 # Home Credit Default Risk ML
 
-Leakage-safe machine-learning pipeline for Kaggle
-[**Home Credit Default Risk**](https://www.kaggle.com/c/home-credit-default-risk).
-It builds customer-level features from the raw Home Credit tables, trains one
-configured primary model, evaluates with out-of-fold validation, and writes a
-Kaggle submission.
+Lemachine-learning pipeline for [**Home Credit Default Risk**](https://www.kaggle.com/c/home-credit-default-risk).
+It builds customer-level features from the raw Home Credit tables,trains configured model, evaluates with out-of-fold validation, and writes a Kaggle submission csv.
 
-Best project result: **0.79074 public leaderboard ROC AUC** from
-`Models/20260420_174015_balanced_catboost`.
+Results: **0.79074 public leaderboard ROC AUC** .
 
 ## Pipeline
 
@@ -19,18 +15,17 @@ Best project result: **0.79074 public leaderboard ROC AUC** from
    report thresholds, fit the final model, and write artifacts under
    `Models/<experiment_id>/`.
 
-Default primary model is **CatBoost**. LightGBM and XGBoost remain configured
+Default primary model is **CatBoost** as choosen from mlflow tracking of the experiments. LightGBM and XGBoost remain configured
 as available candidates.
 
 ## Setup
 
 ```powershell
 uv sync
-.\.venv\Scripts\python.exe main.py --help
+uv run python main.py --help
 ```
 
-Use Python `3.13`. Dependencies are declared in `pyproject.toml` and locked in
-`uv.lock`.
+Dependencies are declared in `pyproject.toml` and locked in `uv.lock`.
 
 ## Data
 
@@ -49,23 +44,30 @@ credit_card_balance.csv
 
 `Data/` is git-ignored.
 
+Large data is tracked with DVC, not Git. After configuring the DVC remote:
+
+```powershell
+uv run dvc pull
+uv run dvc push
+```
+
 ## Run
 
 ```powershell
 # process raw data
-.\.venv\Scripts\python.exe main.py run.step=process
+uv run python main.py run.step=process
 
 # train and generate submission
-.\.venv\Scripts\python.exe main.py run.step=train
+uv run python main.py run.step=train
 
 # run both stages
-.\.venv\Scripts\python.exe main.py run.step=all
+uv run python main.py run.step=all
 ```
 
 Hydra overrides are supported:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py run.step=train training.cv_splits=2 training.optuna_n_trials=5
+uv run python main.py run.step=train training.cv_splits=2 training.optuna_n_trials=5
 ```
 
 If preprocessing config changes, run `run.step=process` before training so
@@ -73,22 +75,28 @@ If preprocessing config changes, run `run.step=process` before training so
 
 ## Training Controls
 
-Main runtime controls in `conf/config.yaml`:
-
-```yaml
-training:
-  cv_splits: 3
-  optuna_n_trials: 10
-  optuna_subsample_rate: 0.35
-  run_full_oof_validation: true
-  models:
-    primary: "catboost"
-```
+Main runtime controls live in `conf/config.yaml`. 
 
 Faster smoke run:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py run.step=train training.cv_splits=2 training.optuna_n_trials=5 training.optuna_subsample_rate=0.15 training.run_full_oof_validation=false
+uv run python main.py run.step=train `
+  training.cv_splits=2 `
+  training.optuna_n_trials=5 `
+  training.optuna_subsample_rate=0.15 `
+  training.run_full_oof_validation=false
+```
+
+Hydra multirun populate several MLflow runs:
+
+```powershell
+uv run python main.py -m run.step=train `
+  training.models.primary=catboost,lightgbm,xgboost `
+  training.preprocessing.imbalance.strategy=smote,borderline_smote,adasyn,undersample,oversample `
+  training.preprocessing.scaler=standard,robust,minmax `
+  training.optuna_n_trials=5 `
+  training.optuna_subsample_rate=0.15 `
+  training.cv_splits=2
 ```
 
 ## Inference
@@ -96,7 +104,7 @@ Faster smoke run:
 Score already processed feature rows:
 
 ```powershell
-.\.venv\Scripts\python.exe src\inference.py --input Data\final\final_test.csv
+uv run python src\inference.py --input Data\final\final_test.csv
 ```
 
 The input must match the processed feature schema. Raw application rows alone
@@ -116,34 +124,19 @@ Training writes:
 
 ```text
 Models/<experiment_id>/
-Models/latest_experiment.txt
 ```
 
-Common artifacts:
+Each experiment keeps its own artifacts and are being tracked using mlflow and dvc such as the model, preprocessor, submission, metrics, report,
+feature importance, ROC/confusion plots, config snapshot, and logs.
 
-```text
-config_snapshot.yaml
-training_run_metadata.yaml
-logs/training.log
-threshold.yaml
-final_model.pkl
-training_preprocessor.pkl
-submission.csv
-reports/evaluation_report.txt
-reports/metrics.yaml
-reports/threshold_table.csv
-reports/feature_importance.csv
-plots/confusion_matrix.png
-plots/roc_curve.png
-plots/feature_importance_top.png
-```
-
-Submission file: `Models/<experiment_id>/submission.csv`, with
+Submission file is `Models/<experiment_id>/submission.csv` with
 `SK_ID_CURR,TARGET`; `TARGET` is a probability for Kaggle ROC AUC scoring.
 
-MLflow tracking is configured for DagsHub by default. Local artifacts remain the
-source of truth; MLflow mirrors key params, metrics, and curated artifacts. Use
-`tracking.mlflow.enabled=false` to disable tracking for local smoke runs.
+## Experiment Tracking
+
+MLflow is configured for DagsHub by default. Local artifacts remain the source
+of truth; MLflow mirrors core params, metrics, tags, and curated artifacts.
+The option to disable tracking for local-only runs is avalaible using hydra config override with `tracking.mlflow.enabled=false`.
 
 ## Config
 
@@ -166,27 +159,20 @@ src/
   analysis/         SHAP analysis workflow
 ```
 
-Compatibility wrappers remain:
-
-```text
-src/inference.py
-src/shap_analysis.py
-```
-
 ## Model Visuals
 
 ### ROC Curve Comparison
 
 | Best Balanced CatBoost | Vanilla Baseline CatBoost |
 | --- | --- |
-| ![ROC curve for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/roc_curve.png) | ![ROC curve for the vanilla baseline CatBoost experiment](Models/baseline/roc_curve.png) |
+| ![ROC curve for the best CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/roc_curve.png) | ![ROC curve for the vanilla baseline data with CatBoost experiment](Models/baseline/roc_curve.png) |
 
 ### Feature Importance
 
-![Top feature importances for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/feature_importance_top.png)
+![Top feature importances for the best CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/feature_importance_top.png)
 
 ### SHAP Analysis
 
 | Mean Absolute SHAP Contributions | SHAP Beeswarm-Style View |
 | --- | --- |
-| ![SHAP summary bar plot for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/shap_summary_bar.png) | ![SHAP beeswarm-style plot for the best balanced CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/shap_beeswarm_top.png) |
+| ![SHAP summary bar plot for the best CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/shap_summary_bar.png) | ![SHAP beeswarm-style plot for the best CatBoost experiment](Models/20260420_174015_balanced_catboost/plots/shap_beeswarm_top.png) |
