@@ -1,13 +1,27 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from src.model_training.tracking import MlflowTracker, dagshub_repo_from_uri, numeric_items, tracking_run
 
 
 def tracking_config(enabled=False):
     return {
-        "tracking": {"mlflow": {"enabled": enabled, "log_artifacts": True, "log_model_artifacts": True}},
+        "tracking": {
+            "mlflow": {
+                "enabled": enabled,
+                "log_artifacts": True,
+                "log_model_artifacts": True,
+                "registry": {
+                    "enabled": False,
+                    "registered_model_name": "home-credit-default-risk",
+                    "alias": "champion",
+                    "min_roc_auc": 0.0,
+                    "required": False,
+                },
+            }
+        },
         "training": {
             "cv_splits": 3,
             "optuna_n_trials": 10,
@@ -29,6 +43,8 @@ def tracking_config(enabled=False):
                 "candidates": [{"name": "catboost", "params": {"depth": 6}}],
             },
         },
+        "data": {"final": {"train": "Data/final/final_train.csv"}},
+        "inference": {"probability_col": "TARGET_PROBABILITY"},
     }
 
 
@@ -38,6 +54,9 @@ class FakeMlflow:
         self.metrics = {}
         self.params = {}
         self.tags = {}
+        self.model_version_tags = {}
+        self.aliases = {}
+        self.tracking = SimpleNamespace(MlflowClient=lambda: self)
 
     def log_artifact(self, path, artifact_path=None):
         self.artifacts.append((Path(path).name, artifact_path))
@@ -53,6 +72,25 @@ class FakeMlflow:
 
     def set_tags(self, tags):
         self.tags.update(tags)
+
+    def set_tag(self, key, value):
+        self.tags[key] = value
+
+    def set_model_version_tag(self, model_name, version, key, value):
+        self.model_version_tags[(model_name, version, key)] = value
+
+    def set_registered_model_alias(self, model_name, alias, version):
+        self.aliases[(model_name, alias)] = version
+
+
+class RegistryTracker(MlflowTracker):
+    def __init__(self, mlflow_module, config, models_dir):
+        super().__init__(mlflow_module, config, models_dir)
+        self.registry_calls = []
+
+    def _log_pyfunc_model(self, registry):
+        self.registry_calls.append(registry)
+        return SimpleNamespace(registered_model_version="7")
 
 
 class TrackingTest(unittest.TestCase):
@@ -102,10 +140,67 @@ class TrackingTest(unittest.TestCase):
 
             MlflowTracker(fake, tracking_config(enabled=True), models_dir).log_final(metadata)
 
-            self.assertEqual(fake.params["primary_model"], "catboost")
-            self.assertEqual(fake.tags["experiment_id"], "x")
             self.assertEqual(fake.metrics["ranking.roc_auc"], 0.81)
             self.assertIn(("metrics.yaml", "reports"), fake.artifacts)
+
+    def test_start_logging_records_params_and_tags_before_metrics_exist(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            models_dir = Path(tmp_dir)
+            metadata = {
+                "experiment_id": "x",
+                "primary_model": "catboost",
+                "config_hash": "abc",
+                "data_hashes": {"train": "hash"},
+            }
+            fake = FakeMlflow()
+
+            MlflowTracker(fake, tracking_config(enabled=True), models_dir).log_start(metadata)
+
+            self.assertEqual(fake.params["primary_model"], "catboost")
+            self.assertEqual(fake.tags["experiment_id"], "x")
+            self.assertEqual(fake.metrics, {})
+
+    def test_registry_skips_when_metric_gate_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            models_dir = Path(tmp_dir)
+            (models_dir / "reports").mkdir()
+            (models_dir / "reports" / "metrics.yaml").write_text("ranking:\n  roc_auc: 0.5\n", encoding="utf-8")
+            config = tracking_config(enabled=True)
+            config["tracking"]["mlflow"]["registry"]["enabled"] = True
+            config["tracking"]["mlflow"]["registry"]["min_roc_auc"] = 0.8
+            fake = FakeMlflow()
+
+            RegistryTracker(fake, config, models_dir).log_final(
+                {"experiment_id": "x", "primary_model": "catboost", "config_hash": "abc"}
+            )
+
+            self.assertEqual(fake.tags["registry_status"], "skipped_metric_gate")
+
+    def test_registry_registers_model_and_sets_alias(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            models_dir = Path(tmp_dir)
+            (models_dir / "reports").mkdir()
+            (models_dir / "reports" / "metrics.yaml").write_text("ranking:\n  roc_auc: 0.9\n", encoding="utf-8")
+            config = tracking_config(enabled=True)
+            config["tracking"]["mlflow"]["registry"]["enabled"] = True
+            fake = FakeMlflow()
+            metadata = {
+                "experiment_id": "x",
+                "primary_model": "catboost",
+                "config_hash": "abc",
+                "data_hashes": {"train": "hash"},
+            }
+
+            tracker = RegistryTracker(fake, config, models_dir)
+            tracker.log_final(metadata)
+
+            self.assertEqual(fake.tags["registry_status"], "registered")
+            self.assertEqual(fake.aliases[("home-credit-default-risk", "champion")], "7")
+            self.assertEqual(
+                fake.model_version_tags[("home-credit-default-risk", "7", "experiment_id")],
+                "x",
+            )
+            self.assertEqual(len(tracker.registry_calls), 1)
 
 
 if __name__ == "__main__":

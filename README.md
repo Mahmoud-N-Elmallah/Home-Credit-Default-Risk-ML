@@ -57,6 +57,9 @@ The reproducible process/train pipeline is defined in `dvc.yaml`:
 uv run dvc repro
 ```
 
+Data validation runs during `process` and writes
+`Data/final/validation_report.yaml`.
+
 ## Run
 
 ```powershell
@@ -147,6 +150,10 @@ Submission file is `Models/<experiment_id>/submission.csv` with
 MLflow is configured for DagsHub by default. Set DagsHub auth before remote
 tracking, or disable tracking for local-only runs with
 `tracking.mlflow.enabled=false`.
+
+Training logs params, metrics, curated artifacts, and a PyFunc model wrapper to
+MLflow. Accepted runs are registered as `home-credit-default-risk` and assigned
+the `champion` alias when the configured metric gate passes.
 
 ## Config
 

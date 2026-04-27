@@ -37,6 +37,7 @@ data:
     train: "Data/final/final_train.csv"
     test: "Data/final/final_test.csv"
     feature_manifest: "Data/final/feature_manifest.yaml"
+    validation_report: "Data/final/validation_report.yaml"
 
 pipeline:
   high_null_threshold: 0.6
@@ -77,6 +78,12 @@ tracking:
     experiment_name: "home-credit-default-risk-ml"
     log_artifacts: true
     log_model_artifacts: true
+    registry:
+      enabled: true
+      registered_model_name: "home-credit-default-risk"
+      alias: "champion"
+      min_roc_auc: 0.0
+      required: false
 
 analysis:
   shap:
@@ -100,8 +107,8 @@ training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
   cv_splits: 3
-  optuna_n_trials: 10
-  optuna_subsample_rate: 0.35
+  optuna_n_trials: 5
+  optuna_subsample_rate: 0.20
   run_full_oof_validation: true
   accelerator: "gpu"
   phases:

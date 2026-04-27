@@ -19,9 +19,9 @@ stages:
       nfiles: 5
     - path: src/data_processing
       hash: md5
-      md5: 5158fa22bd9e9a9804809f1ea13c6b23.dir
-      size: 57419
-      nfiles: 7
+      md5: d15c7f845de2a16ce22bca87b03acc42.dir
+      size: 64135
+      nfiles: 8
     params:
       conf/config.yaml:
         data.csv:
@@ -37,6 +37,7 @@ stages:
           train: Data/final/final_train.csv
           test: Data/final/final_test.csv
           feature_manifest: Data/final/feature_manifest.yaml
+          validation_report: Data/final/validation_report.yaml
         data.raw:
           application_train: Data/Raw/application_train.csv
           application_test: Data/Raw/application_test.csv
@@ -82,18 +83,18 @@ stages:
     outs:
     - path: Data/final
       hash: md5
-      md5: c3186e437d143e896d52282cbf07fc3e.dir
-      size: 1029783990
-      nfiles: 3
+      md5: ca1891dfcdf5a7fedd20188d738c5555.dir
+      size: 1029787487
+      nfiles: 4
   train:
     cmd: uv run python main.py run.step=train training.experiment.name=dvc_train
       training.experiment.overwrite_existing=true
     deps:
     - path: Data/final
       hash: md5
-      md5: c3186e437d143e896d52282cbf07fc3e.dir
-      size: 1029783990
-      nfiles: 3
+      md5: ca1891dfcdf5a7fedd20188d738c5555.dir
+      size: 1029787487
+      nfiles: 4
     - path: main.py
       hash: md5
       md5: a91c470a2340cc51a5c581a2aea4fe14
@@ -105,8 +106,8 @@ stages:
       nfiles: 5
     - path: src/model_training
       hash: md5
-      md5: d7b51cf5590e702a6a573135d66655f1.dir
-      size: 47191
+      md5: 852d18e9653aa0e40de6e66513ed4cc5.dir
+      size: 52346
       nfiles: 9
     params:
       conf/config.yaml:
@@ -114,6 +115,7 @@ stages:
           train: Data/final/final_train.csv
           test: Data/final/final_test.csv
           feature_manifest: Data/final/feature_manifest.yaml
+          validation_report: Data/final/validation_report.yaml
         globals:
           random_state: 42
           division_epsilon: 1e-09
@@ -125,12 +127,18 @@ stages:
             experiment_name: home-credit-default-risk-ml
             log_artifacts: true
             log_model_artifacts: true
+            registry:
+              enabled: true
+              registered_model_name: home-credit-default-risk
+              alias: champion
+              min_roc_auc: 0.0
+              required: false
         training:
           target_col: TARGET
           id_col: SK_ID_CURR
           cv_splits: 3
-          optuna_n_trials: 10
-          optuna_subsample_rate: 0.35
+          optuna_n_trials: 5
+          optuna_subsample_rate: 0.2
           run_full_oof_validation: true
           accelerator: gpu
           phases:
@@ -266,57 +274,57 @@ stages:
     outs:
     - path: Models/dvc_train/best_params.yaml
       hash: md5
-      md5: 7bd85c7b33021a2d7ebc6cbf4d926210
-      size: 97
+      md5: bbcb277ce7d977651bed759ae4c207dd
+      size: 98
     - path: Models/dvc_train/config_snapshot.yaml
       hash: md5
-      md5: 5a7266acb7f630d0c94b28289c3f5226
-      size: 5475
+      md5: 6acab702babbd40448982dcd7a2aa065
+      size: 5692
     - path: Models/dvc_train/final_model.pkl
       hash: md5
-      md5: 5c92e97477a93550ca3d6cb1d816c872
-      size: 811528
+      md5: 5cd041d9569cbf0b0ede7acbe03ad6cd
+      size: 1406024
     - path: Models/dvc_train/plots/confusion_matrix.png
       hash: md5
-      md5: 8086f485a7494593d98adc819c58c2a0
-      size: 20969
+      md5: ba60bac37eae96454140f294e3f64f51
+      size: 20939
     - path: Models/dvc_train/plots/feature_importance_top.png
       hash: md5
-      md5: b32bb04411d1bf4c94622a1d3bab819c
-      size: 126544
+      md5: 47ce13bc848b56e7baccbfd7f6f694fa
+      size: 125953
     - path: Models/dvc_train/plots/roc_curve.png
       hash: md5
-      md5: 1c3f311c46e446beedf7dbb8e2cee0c4
-      size: 30442
+      md5: ae815850850038ce36f24c58526ed787
+      size: 30523
     - path: Models/dvc_train/reports/evaluation_report.txt
       hash: md5
-      md5: bc55be5070fbef8903945148ba14f4a5
+      md5: e89a28fd8278495338db314c1925c690
       size: 777
     - path: Models/dvc_train/reports/feature_importance.csv
       hash: md5
-      md5: eb3418431fbb8be5336a7f4fed958b50
-      size: 7002
+      md5: b388a4b9596c62bfa972ff2db7e4340b
+      size: 7029
     - path: Models/dvc_train/reports/metrics.yaml
       hash: md5
-      md5: 8071a160ed729d2b316b1b4ce7f03d1b
-      size: 414
+      md5: c0229618667fd3d2c6390ffa13652f12
+      size: 412
     - path: Models/dvc_train/reports/threshold_table.csv
       hash: md5
-      md5: e4689037f4f22c048b882bbc6a55e378
-      size: 8181
+      md5: 951a349be8285a2e5f15a2cbc31115f4
+      size: 8115
     - path: Models/dvc_train/submission.csv
       hash: md5
-      md5: 8114a3c09a1118d534f79ce6c248244e
-      size: 1335068
+      md5: 8c1caa02d319dee7478e4bd19a941bdb
+      size: 1333535
     - path: Models/dvc_train/threshold.yaml
       hash: md5
-      md5: 43d58be098966a60f87e080d0266c967
+      md5: 68e7cc22ba9a26980183bd8092c11e87
       size: 79
     - path: Models/dvc_train/training_preprocessor.pkl
       hash: md5
-      md5: e38eaeb27b6f682561c8d242dfa4a11a
-      size: 854747
+      md5: 516786097cbcbd1102ddd7d62c7ba583
+      size: 854739
     - path: Models/dvc_train/training_run_metadata.yaml
       hash: md5
-      md5: e6b41bb2b06e890c2ea59a669bb601a2
-      size: 1101
+      md5: f9d393f8b8966952c20d6ecc023258fc
+      size: 1099

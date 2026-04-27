@@ -17,14 +17,32 @@ from src.data_processing.features import (
     validate,
 )
 from src.data_processing.io import latest_submission_path, load_data, write_feature_manifest
+from src.data_processing.validation import (
+    validate_final_frames,
+    validate_raw_frames,
+    validate_raw_paths,
+    write_validation_report,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
 def run_pipeline(config):
+    raw_path_report = validate_raw_paths(config)
     train_base, test_base, bureau, bureau_balance, prev_app, pos_cash, installments, cc_balance = load_data(
         config["data"]["raw"],
+        config,
+    )
+    raw_schema_report = validate_raw_frames(
+        train_base,
+        test_base,
+        bureau,
+        bureau_balance,
+        prev_app,
+        pos_cash,
+        installments,
+        cc_balance,
         config,
     )
     train_base, test_base = preprocess_base(train_base, test_base, config)
@@ -42,7 +60,9 @@ def run_pipeline(config):
     test_full = add_global_features(test_full, config)
     train_full, test_full, cleanup_info = feature_cleanup(train_full, test_full, config)
     validate(train_full, test_full, config)
+    final_report = validate_final_frames(train_full, test_full, config)
     write_feature_manifest(train_full, test_full, config, cleanup_info)
+    validation_report_path = write_validation_report(config, raw_path_report, raw_schema_report, final_report)
 
     final_paths = config["data"]["final"]
     Path(final_paths["train"]).parent.mkdir(parents=True, exist_ok=True)
@@ -51,4 +71,5 @@ def run_pipeline(config):
     submission_path = latest_submission_path(config)
     if config["pipeline"]["warn_on_stale_submission"] and submission_path is not None and submission_path.exists():
         logger.warning("Existing submission may be stale after processing. Regenerate it with run.step=train: %s", submission_path)
+    logger.info("Validation report saved to %s", validation_report_path)
     logger.info("Data processing done.")
