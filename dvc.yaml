@@ -1,0 +1,64 @@
+stages:
+  process:
+    cmd: uv run python main.py run.step=process
+    deps:
+      - Data/Raw
+      - main.py
+      - src/common
+      - src/data_processing
+    params:
+      - conf/config.yaml:
+          - globals
+          - data.csv
+          - data.raw
+          - data.final
+          - pipeline
+    outs:
+      - Data/final
+
+  train:
+    cmd: >-
+      uv run python main.py run.step=train
+      training.experiment.name=dvc_train
+      training.experiment.overwrite_existing=true
+    deps:
+      - Data/final
+      - main.py
+      - src/common
+      - src/model_training
+    params:
+      - conf/config.yaml:
+          - globals
+          - data.final
+          - tracking
+          - training
+    outs:
+      - Models/dvc_train/best_params.yaml:
+          cache: false
+      - Models/dvc_train/config_snapshot.yaml:
+          cache: false
+      - Models/dvc_train/final_model.pkl:
+          cache: false
+      - Models/dvc_train/submission.csv:
+          cache: false
+      - Models/dvc_train/threshold.yaml:
+          cache: false
+      - Models/dvc_train/training_preprocessor.pkl:
+          cache: false
+      - Models/dvc_train/training_run_metadata.yaml:
+          cache: false
+      - Models/dvc_train/reports/evaluation_report.txt:
+          cache: false
+      - Models/dvc_train/reports/feature_importance.csv:
+          cache: false
+      - Models/dvc_train/reports/threshold_table.csv:
+          cache: false
+      - Models/dvc_train/plots/confusion_matrix.png:
+          cache: false
+      - Models/dvc_train/plots/feature_importance_top.png:
+          cache: false
+      - Models/dvc_train/plots/roc_curve.png:
+          cache: false
+    metrics:
+      - Models/dvc_train/reports/metrics.yaml:
+          cache: false

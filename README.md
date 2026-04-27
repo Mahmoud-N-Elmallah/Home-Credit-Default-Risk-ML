@@ -1,7 +1,7 @@
 # Home Credit Default Risk ML
 
-Lemachine-learning pipeline for [**Home Credit Default Risk**](https://www.kaggle.com/c/home-credit-default-risk).
-It builds customer-level features from the raw Home Credit tables,trains configured model, evaluates with out-of-fold validation, and writes a Kaggle submission csv.
+Machine-learning pipeline for [**Home Credit Default Risk**](https://www.kaggle.com/c/home-credit-default-risk).
+It builds customer-level features from raw Home Credit tables, trains a configured model, evaluates with out-of-fold validation, and writes a Kaggle submission CSV.
 
 Results: **0.79074 public leaderboard ROC AUC** .
 
@@ -15,7 +15,7 @@ Results: **0.79074 public leaderboard ROC AUC** .
    report thresholds, fit the final model, and write artifacts under
    `Models/<experiment_id>/`.
 
-Default primary model is **CatBoost** as choosen from mlflow tracking of the experiments. LightGBM and XGBoost remain configured
+Default primary model is **CatBoost**. LightGBM and XGBoost remain configured
 as available candidates.
 
 ## Setup
@@ -49,6 +49,12 @@ Large data is tracked with DVC, not Git. After configuring the DVC remote:
 ```powershell
 uv run dvc pull
 uv run dvc push
+```
+
+The reproducible process/train pipeline is defined in `dvc.yaml`:
+
+```powershell
+uv run dvc repro
 ```
 
 ## Run
@@ -87,12 +93,12 @@ uv run python main.py run.step=train `
   training.run_full_oof_validation=false
 ```
 
-Hydra multirun populate several MLflow runs:
+Hydra multirun can populate several MLflow runs:
 
 ```powershell
 uv run python main.py -m run.step=train `
-  training.models.primary=catboost,lightgbm,xgboost `
-  training.preprocessing.imbalance.strategy=smote,borderline_smote,adasyn,undersample,oversample `
+  training.models.primary=catboost `
+  training.preprocessing.imbalance.strategy=smote,borderline_smote,adasyn `
   training.preprocessing.scaler=standard,robust,minmax `
   training.optuna_n_trials=5 `
   training.optuna_subsample_rate=0.15 `
@@ -126,17 +132,19 @@ Training writes:
 Models/<experiment_id>/
 ```
 
-Each experiment keeps its own artifacts and are being tracked using mlflow and dvc such as the model, preprocessor, submission, metrics, report,
-feature importance, ROC/confusion plots, config snapshot, and logs.
+Each experiment keeps its own artifacts: model, preprocessor, submission,
+metrics, report, feature importance, ROC/confusion plots, config snapshot, and
+logs. DVC owns the reproducible `Models/dvc_train` output; MLflow mirrors
+curated experiment metadata and artifacts for comparison.
 
 Submission file is `Models/<experiment_id>/submission.csv` with
 `SK_ID_CURR,TARGET`; `TARGET` is a probability for Kaggle ROC AUC scoring.
 
 ## Experiment Tracking
 
-MLflow is configured for DagsHub by default. Local artifacts remain the source
-of truth; MLflow mirrors core params, metrics, tags, and curated artifacts.
-The option to disable tracking for local-only runs is avalaible using hydra config override with `tracking.mlflow.enabled=false`.
+MLflow is configured for DagsHub by default. Set DagsHub auth before remote
+tracking, or disable tracking for local-only runs with
+`tracking.mlflow.enabled=false`.
 
 ## Config
 

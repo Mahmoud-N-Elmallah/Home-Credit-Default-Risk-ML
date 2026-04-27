@@ -137,6 +137,7 @@ training:
   experiment:
     name:
     folder_template: "{timestamp}_{primary_model}"
+    overwrite_existing: false
   threshold_tuning:
     enabled: true
     objective: "f1"
@@ -267,7 +268,7 @@ training:
           model__iterations: { type: "int", low: 500, high: 2000 }
           model__learning_rate: { type: "float", low: 0.01, high: 0.1, log: true }
           model__depth: { type: "int", low: 4, high: 10 }
-          model__l2_leaf_reg: { type: "float", low: 1, high: 10 }
+          model__l2_leaf_reg: { type: "float", low: 0.5, high: 20 }
 
       - name: "lightgbm"
         params:

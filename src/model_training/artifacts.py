@@ -2,6 +2,7 @@ from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 import re
+import shutil
 
 import yaml
 
@@ -33,6 +34,11 @@ def create_experiment_dir(models_root, config):
     exp_config = t_config["experiment"]
     if exp_config.get("name"):
         experiment_id = slugify(exp_config["name"])
+        experiment_dir = models_root / experiment_id
+        if exp_config.get("overwrite_existing", False) and experiment_dir.exists():
+            shutil.rmtree(experiment_dir)
+        experiment_dir.mkdir(parents=True, exist_ok=True)
+        return experiment_dir, experiment_dir.name, timestamp
     else:
         experiment_id = exp_config["folder_template"].format(
             timestamp=timestamp,
@@ -40,13 +46,13 @@ def create_experiment_dir(models_root, config):
         )
         experiment_id = slugify(experiment_id)
 
-    experiment_dir = models_root / experiment_id
-    suffix = 1
-    while experiment_dir.exists():
-        suffix += 1
-        experiment_dir = models_root / f"{experiment_id}_{suffix}"
-    experiment_dir.mkdir(parents=True, exist_ok=False)
-    return experiment_dir, experiment_dir.name, timestamp
+        experiment_dir = models_root / experiment_id
+        suffix = 1
+        while experiment_dir.exists():
+            suffix += 1
+            experiment_dir = models_root / f"{experiment_id}_{suffix}"
+        experiment_dir.mkdir(parents=True, exist_ok=False)
+        return experiment_dir, experiment_dir.name, timestamp
 
 
 def write_latest_experiment_pointer(models_root, config, experiment_dir):

@@ -1,0 +1,402 @@
+schema: '2.0'
+stages:
+  process:
+    cmd: uv run python main.py run.step=process
+    deps:
+    - path: Data/Raw
+      hash: md5
+      md5: be145c3854454ad97fd16454f9aed966.dir
+      size: 2684261617
+      nfiles: 10
+    - path: main.py
+      hash: md5
+      md5: a91c470a2340cc51a5c581a2aea4fe14
+      size: 1356
+    - path: src/common
+      hash: md5
+      md5: 775aedbb6792d5d75ac58897a6678902.dir
+      size: 3645
+      nfiles: 5
+    - path: src/data_processing
+      hash: md5
+      md5: b1329d2184fa79eb622e7a5c79151a67.dir
+      size: 57413
+      nfiles: 7
+    params:
+      conf/config.yaml:
+        data.csv:
+          infer_schema_length: 10000
+          null_values:
+          - ''
+          - NA
+          - NaN
+          - nan
+          - 'NULL'
+          ignore_errors: false
+        data.final:
+          train: Data/final/final_train.csv
+          test: Data/final/final_test.csv
+          feature_manifest: Data/final/feature_manifest.yaml
+        data.raw:
+          application_train: Data/Raw/application_train.csv
+          application_test: Data/Raw/application_test.csv
+          bureau: Data/Raw/bureau.csv
+          bureau_balance: Data/Raw/bureau_balance.csv
+          previous_application: Data/Raw/previous_application.csv
+          pos_cash_balance: Data/Raw/POS_CASH_balance.csv
+          installments_payments: Data/Raw/installments_payments.csv
+          credit_card_balance: Data/Raw/credit_card_balance.csv
+        globals:
+          random_state: 42
+          division_epsilon: 1e-09
+        pipeline:
+          high_null_threshold: 0.6
+          correlation_threshold: 0.99
+          variance_threshold: 0.995
+          warn_on_stale_submission: true
+          fill_values:
+            aux_missing: 0
+            generated_missing: 0
+            test_missing_column: 0
+          categorical_encoding:
+            binary_strategy: ordinal
+            binary_values:
+            - 0
+            - 1
+            unknown_value: -1
+            one_hot_drop_first: false
+            null_category_label: __NULL__
+            frequency_unknown_value: 1
+            frequency_normalize: false
+          anomaly_fix:
+            days_employed: 365243
+          feature_engineering:
+            enabled_sets:
+            - application_extended
+            - bureau_extended
+            - previous_interest
+            - last_n_aggregations
+            - recency_windows
+            - pos_cash_cleanup
+            - missing_indicators
+    outs:
+    - path: Data/final
+      hash: md5
+      md5: c3186e437d143e896d52282cbf07fc3e.dir
+      size: 1029783990
+      nfiles: 3
+  train:
+    cmd: uv run python main.py run.step=train training.experiment.name=dvc_train
+      training.experiment.overwrite_existing=true
+    deps:
+    - path: Data/final
+      hash: md5
+      md5: c3186e437d143e896d52282cbf07fc3e.dir
+      size: 1029783990
+      nfiles: 3
+    - path: main.py
+      hash: md5
+      md5: a91c470a2340cc51a5c581a2aea4fe14
+      size: 1356
+    - path: src/common
+      hash: md5
+      md5: 775aedbb6792d5d75ac58897a6678902.dir
+      size: 3645
+      nfiles: 5
+    - path: src/model_training
+      hash: md5
+      md5: 86ec7787c6e93344322c2a13e0f7617b.dir
+      size: 47502
+      nfiles: 9
+    params:
+      conf/config.yaml:
+        data.final:
+          train: Data/final/final_train.csv
+          test: Data/final/final_test.csv
+          feature_manifest: Data/final/feature_manifest.yaml
+        globals:
+          random_state: 42
+          division_epsilon: 1e-09
+        tracking:
+          mlflow:
+            enabled: true
+            tracking_uri: 
+              https://dagshub.com/mahmoudelmalah85/Home-Credit-Default-Risk-ML.mlflow
+            experiment_name: home-credit-default-risk-ml
+            log_artifacts: true
+            log_model_artifacts: true
+        training:
+          target_col: TARGET
+          id_col: SK_ID_CURR
+          cv_splits: 3
+          optuna_n_trials: 10
+          optuna_subsample_rate: 0.35
+          run_full_oof_validation: true
+          phases:
+            search: true
+            validate: true
+            final_fit: true
+          artifact_reuse:
+            allow_stale_artifacts: false
+            metadata: training_run_metadata.yaml
+          experiment:
+            name:
+            folder_template: '{timestamp}_{primary_model}'
+            overwrite_existing: false
+          threshold_tuning:
+            enabled: true
+            objective: f1
+            grid:
+              min: 0.01
+              max: 0.99
+              step: 0.01
+          reports:
+            save_threshold_table: true
+            save_curves: true
+            save_feature_importance: true
+            feature_importance_top_n: 50
+          acceleration:
+            preferred: gpu
+            fallback: cpu
+            retry_on_failure: true
+            retry_failure_keywords:
+            - gpu
+            - cuda
+            - opencl
+            - driver
+            - device
+            - not compiled
+            - not supported
+            - no kernel image
+            - cuda error
+            - catboost/libs/train_lib
+            models:
+              catboost:
+                gpu_params:
+                  task_type: GPU
+                cpu_params:
+                  task_type: CPU
+                  thread_count: -1
+              lightgbm:
+                gpu_params:
+                  device_type: gpu
+                cpu_params:
+                  device_type: cpu
+                  n_jobs: -1
+              xgboost:
+                gpu_params:
+                  tree_method: hist
+                  device: cuda
+                cpu_params:
+                  tree_method: hist
+                  device: cpu
+                  n_jobs: -1
+          optimization_metric: roc_auc
+          cv_shuffle: true
+          classification_threshold: 0.5
+          optuna_direction: maximize
+          verbosity:
+            catboost_trial: 0
+            catboost_final: 50
+            lgbm: -1
+            optuna: INFO
+          artifact_paths:
+            models_dir: Models
+            latest_experiment: latest_experiment.txt
+            config_snapshot: config_snapshot.yaml
+            submission: submission.csv
+            preprocessor: training_preprocessor.pkl
+            threshold: threshold.yaml
+            best_params: best_params.yaml
+            single_model: final_model.pkl
+            evaluation_report: reports/evaluation_report.txt
+            metrics: reports/metrics.yaml
+            threshold_table: reports/threshold_table.csv
+            feature_importance: reports/feature_importance.csv
+            feature_importance_plot: plots/feature_importance_top.png
+            confusion_matrix: plots/confusion_matrix.png
+            roc_curve: plots/roc_curve.png
+          evaluation:
+            report_digits: 4
+            confusion_matrix_figsize:
+            - 6
+            - 5
+            confusion_matrix_cmap: Blues
+            roc_curve_figsize:
+            - 6
+            - 5
+            feature_importance_fig_width: 8
+            feature_importance_min_height: 4
+            feature_importance_max_height: 12
+            feature_importance_height_per_feature: 0.22
+          preprocessing:
+            scaler: robust
+            imbalance:
+              strategy: class_weight
+              sampler_params: {}
+              class_weight_params:
+                catboost:
+                  auto_class_weights: Balanced
+                lightgbm:
+                  is_unbalance: true
+                xgboost:
+                  scale_pos_weight: 11.3
+            feature_selection:
+              method: lgbm
+              max_features: 150
+              threshold: -inf
+              enabled_during_search: false
+              selector_params:
+                n_estimators: 200
+                verbose: -1
+            feature_pruning:
+              enabled: false
+              source: feature_importance
+              min_importance: 0.0
+              keep_top_n:
+              always_keep: []
+          models:
+            primary: catboost
+            candidates:
+            - name: catboost
+              params:
+                iterations: 1000
+                learning_rate: 0.05
+                depth: 6
+                early_stopping_rounds: 50
+                eval_fraction: 0.1
+                allow_writing_files: false
+                bootstrap_type: Bernoulli
+                rsm: 0.8
+              search_space:
+                model__iterations:
+                  type: int
+                  low: 500
+                  high: 2000
+                model__learning_rate:
+                  type: float
+                  low: 0.01
+                  high: 0.1
+                  log: true
+                model__depth:
+                  type: int
+                  low: 4
+                  high: 10
+                model__l2_leaf_reg:
+                  type: float
+                  low: 0.5
+                  high: 20
+            - name: lightgbm
+              params:
+                n_estimators: 1000
+                learning_rate: 0.05
+                max_depth: 6
+                early_stopping_rounds: 50
+                eval_fraction: 0.1
+                force_col_wise: true
+                num_threads: -1
+              search_space:
+                model__num_leaves:
+                  type: int
+                  low: 20
+                  high: 128
+                model__max_depth:
+                  type: int
+                  low: 4
+                  high: 12
+                model__learning_rate:
+                  type: float
+                  low: 0.01
+                  high: 0.1
+                  log: true
+                model__n_estimators:
+                  type: int
+                  low: 500
+                  high: 2000
+            - name: xgboost
+              params:
+                n_estimators: 1000
+                learning_rate: 0.05
+                max_depth: 6
+                early_stopping_rounds: 50
+                eval_fraction: 0.1
+                n_jobs: -1
+              search_space:
+                model__n_estimators:
+                  type: int
+                  low: 500
+                  high: 2000
+                model__learning_rate:
+                  type: float
+                  low: 0.01
+                  high: 0.1
+                  log: true
+                model__max_depth:
+                  type: int
+                  low: 4
+                  high: 10
+                model__gamma:
+                  type: float
+                  low: 0
+                  high: 10
+                model__reg_alpha:
+                  type: float
+                  low: 0
+                  high: 10
+    outs:
+    - path: Models/dvc_train/best_params.yaml
+      hash: md5
+      md5: 7bd85c7b33021a2d7ebc6cbf4d926210
+      size: 97
+    - path: Models/dvc_train/config_snapshot.yaml
+      hash: md5
+      md5: 915fa4976df0b782d0be1c3a2bf2acf6
+      size: 8389
+    - path: Models/dvc_train/final_model.pkl
+      hash: md5
+      md5: d517cf68a342c6829f38bbcb89dfb506
+      size: 791040
+    - path: Models/dvc_train/plots/confusion_matrix.png
+      hash: md5
+      md5: 530a93ecbbbf7ac016989dd9dc1cec8a
+      size: 20967
+    - path: Models/dvc_train/plots/feature_importance_top.png
+      hash: md5
+      md5: 29b74b1c8d4b08c6eeac0dbd3b6cb83d
+      size: 127113
+    - path: Models/dvc_train/plots/roc_curve.png
+      hash: md5
+      md5: 28925ebf388fd4b5110213decef09e76
+      size: 30444
+    - path: Models/dvc_train/reports/evaluation_report.txt
+      hash: md5
+      md5: 1290367565f089b529ad2c5346d7c5c4
+      size: 777
+    - path: Models/dvc_train/reports/feature_importance.csv
+      hash: md5
+      md5: 3af7f19b6a0f4da1d7f774f42b6ecd7e
+      size: 7029
+    - path: Models/dvc_train/reports/metrics.yaml
+      hash: md5
+      md5: f6e09131edd5bc21bcabe6dac2ff3243
+      size: 414
+    - path: Models/dvc_train/reports/threshold_table.csv
+      hash: md5
+      md5: be9c2720786b032b1a4c68b98c00ce8a
+      size: 8234
+    - path: Models/dvc_train/submission.csv
+      hash: md5
+      md5: d097d9a01e938451463b27f7d03dd202
+      size: 1334928
+    - path: Models/dvc_train/threshold.yaml
+      hash: md5
+      md5: a2726bf3fb4922f97d114a52a3dd3945
+      size: 80
+    - path: Models/dvc_train/training_preprocessor.pkl
+      hash: md5
+      md5: 4f15804ab258f5fc80734a41339f1860
+      size: 857104
+    - path: Models/dvc_train/training_run_metadata.yaml
+      hash: md5
+      md5: 943f356ef8579ce04e6d6eeb9b07bf0d
+      size: 1102
