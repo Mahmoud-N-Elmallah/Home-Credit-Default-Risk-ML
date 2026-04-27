@@ -10,17 +10,18 @@ stages:
       nfiles: 10
     - path: main.py
       hash: md5
-      md5: a91c470a2340cc51a5c581a2aea4fe14
-      size: 1356
+      md5: 500675d91bf3d04eefff0df2054a14b3
+      size: 1661
+      isexec: true
     - path: src/common
       hash: md5
-      md5: 7d4ac528c730d36f856750125ad2c50b.dir
-      size: 4832
+      md5: dee3a6db3ce0bc305c9504595c58f81b.dir
+      size: 4802
       nfiles: 5
     - path: src/data_processing
       hash: md5
-      md5: d15c7f845de2a16ce22bca87b03acc42.dir
-      size: 64135
+      md5: ceebc8149f69b37b2c5fd72d8bff9477.dir
+      size: 63481
       nfiles: 8
     params:
       conf/config.yaml:
@@ -83,8 +84,8 @@ stages:
     outs:
     - path: Data/final
       hash: md5
-      md5: ca1891dfcdf5a7fedd20188d738c5555.dir
-      size: 1029787487
+      md5: 841a6c5599b0cba3fd3b77a839c98f67.dir
+      size: 1029786270
       nfiles: 4
   train:
     cmd: uv run python main.py run.step=train training.experiment.name=dvc_train
@@ -92,22 +93,23 @@ stages:
     deps:
     - path: Data/final
       hash: md5
-      md5: ca1891dfcdf5a7fedd20188d738c5555.dir
-      size: 1029787487
+      md5: 841a6c5599b0cba3fd3b77a839c98f67.dir
+      size: 1029786270
       nfiles: 4
     - path: main.py
       hash: md5
-      md5: a91c470a2340cc51a5c581a2aea4fe14
-      size: 1356
+      md5: 500675d91bf3d04eefff0df2054a14b3
+      size: 1661
+      isexec: true
     - path: src/common
       hash: md5
-      md5: 7d4ac528c730d36f856750125ad2c50b.dir
-      size: 4832
+      md5: dee3a6db3ce0bc305c9504595c58f81b.dir
+      size: 4802
       nfiles: 5
     - path: src/model_training
       hash: md5
-      md5: 852d18e9653aa0e40de6e66513ed4cc5.dir
-      size: 52346
+      md5: 7095c8215cf0bcb26b9f6c0f0f35731f.dir
+      size: 52237
       nfiles: 9
     params:
       conf/config.yaml:
@@ -274,60 +276,60 @@ stages:
     outs:
     - path: Models/dvc_train/best_params.yaml
       hash: md5
-      md5: bbcb277ce7d977651bed759ae4c207dd
-      size: 98
+      md5: e60d7588a57b768d3b0af00f769a545d
+      size: 94
     - path: Models/dvc_train/config_snapshot.yaml
       hash: md5
-      md5: 6acab702babbd40448982dcd7a2aa065
-      size: 5692
+      md5: 1bfb8acb70d942785b16a61badc72aad
+      size: 5464
     - path: Models/dvc_train/final_model.pkl
       hash: md5
-      md5: 5cd041d9569cbf0b0ede7acbe03ad6cd
-      size: 1406024
+      md5: 7d8c68e2026ea08186545dda54cc8edd
+      size: 1407128
     - path: Models/dvc_train/plots/confusion_matrix.png
       hash: md5
-      md5: ba60bac37eae96454140f294e3f64f51
-      size: 20939
+      md5: eb2df75c0aacb627848250d4bc16f81a
+      size: 23694
     - path: Models/dvc_train/plots/feature_importance_top.png
       hash: md5
-      md5: 47ce13bc848b56e7baccbfd7f6f694fa
-      size: 125953
+      md5: a1d2cfb27425dfaf9bbe3e2ca7672f4f
+      size: 160914
     - path: Models/dvc_train/plots/roc_curve.png
       hash: md5
-      md5: ae815850850038ce36f24c58526ed787
-      size: 30523
+      md5: 199e56bc5ea6ad53e720c41e0215f7a2
+      size: 32687
     - path: Models/dvc_train/reports/evaluation_report.txt
       hash: md5
-      md5: e89a28fd8278495338db314c1925c690
-      size: 777
+      md5: f2ff7a99e33f8780c8d58606ed8e316b
+      size: 753
     - path: Models/dvc_train/reports/feature_importance.csv
       hash: md5
-      md5: b388a4b9596c62bfa972ff2db7e4340b
-      size: 7029
+      md5: a9d0896d369a4289e72f282df1dca598
+      size: 6855
     - path: Models/dvc_train/reports/metrics.yaml
       hash: md5
-      md5: c0229618667fd3d2c6390ffa13652f12
-      size: 412
+      md5: b424de76ca683ee709e5e9e3a0cf78ee
+      size: 397
     - path: Models/dvc_train/reports/threshold_table.csv
       hash: md5
-      md5: 951a349be8285a2e5f15a2cbc31115f4
-      size: 8115
+      md5: 584f749b53cef89c4f03506c605ee339
+      size: 8051
     - path: Models/dvc_train/submission.csv
       hash: md5
-      md5: 8c1caa02d319dee7478e4bd19a941bdb
-      size: 1333535
+      md5: f0de7d898defeafcdb156a8f574502a9
+      size: 1284978
     - path: Models/dvc_train/threshold.yaml
       hash: md5
-      md5: 68e7cc22ba9a26980183bd8092c11e87
-      size: 79
+      md5: 1a0fe135a627447a606ae35f38c5f314
+      size: 75
     - path: Models/dvc_train/training_preprocessor.pkl
       hash: md5
-      md5: 516786097cbcbd1102ddd7d62c7ba583
-      size: 854739
+      md5: c361d7fe9c5fa26b85f4abcd7db9ee83
+      size: 854370
     - path: Models/dvc_train/training_run_metadata.yaml
       hash: md5
-      md5: f9d393f8b8966952c20d6ecc023258fc
-      size: 1099
+      md5: 8dabaace1e1429ef50f1501077c57ab9
+      size: 1055
   download:
     cmd: uv run python main.py run.step=download
     deps:
