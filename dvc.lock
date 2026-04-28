@@ -3,11 +3,38 @@ stages:
   process:
     cmd: uv run python main.py run.step=process
     deps:
-    - path: Data/Raw
+    - path: Data/Raw/POS_CASH_balance.csv
       hash: md5
-      md5: be145c3854454ad97fd16454f9aed966.dir
-      size: 2684261617
-      nfiles: 10
+      md5: cb8e5cc3885d1e53753955ffde317b44
+      size: 392703158
+    - path: Data/Raw/application_test.csv
+      hash: md5
+      md5: 42c2c6b7683003bae1b99c469f79497f
+      size: 26567651
+    - path: Data/Raw/application_train.csv
+      hash: md5
+      md5: 793a017f41fbac1dc28176b26dbab30e
+      size: 166133370
+    - path: Data/Raw/bureau.csv
+      hash: md5
+      md5: ec0f59a16e7071de66b83217b23bb390
+      size: 170016717
+    - path: Data/Raw/bureau_balance.csv
+      hash: md5
+      md5: 5e815ea6eb338752724bcf46da13c602
+      size: 375592889
+    - path: Data/Raw/credit_card_balance.csv
+      hash: md5
+      md5: ff83bfc2285d218802c6dff749bc5efc
+      size: 424582605
+    - path: Data/Raw/installments_payments.csv
+      hash: md5
+      md5: 4e9751972d02c376f0e75edbf6c9d07d
+      size: 723118349
+    - path: Data/Raw/previous_application.csv
+      hash: md5
+      md5: bd1eb5f08a4700414db1742e5cc0f9fa
+      size: 404973293
     - path: main.py
       hash: md5
       md5: 500675d91bf3d04eefff0df2054a14b3
@@ -19,8 +46,8 @@ stages:
       nfiles: 5
     - path: src/data_processing
       hash: md5
-      md5: ceebc8149f69b37b2c5fd72d8bff9477.dir
-      size: 63481
+      md5: 89bddddf7c755a0fbe2a6421baeb6a3f.dir
+      size: 63575
       nfiles: 8
     params:
       conf/config.yaml:
@@ -80,6 +107,8 @@ stages:
             - recency_windows
             - pos_cash_cleanup
             - missing_indicators
+        training.id_col: SK_ID_CURR
+        training.target_col: TARGET
     outs:
     - path: Data/final
       hash: md5
@@ -88,7 +117,7 @@ stages:
       nfiles: 4
   train:
     cmd: uv run python main.py run.step=train training.experiment.name=dvc_train
-      training.experiment.overwrite_existing=true
+      training.experiment.overwrite_existing=true tracking.mlflow.enabled=false
     deps:
     - path: Data/final
       hash: md5
@@ -106,8 +135,8 @@ stages:
       nfiles: 5
     - path: src/model_training
       hash: md5
-      md5: 7095c8215cf0bcb26b9f6c0f0f35731f.dir
-      size: 52237
+      md5: 27c8ba7760b0cd0ce519d44c66563da6.dir
+      size: 52395
       nfiles: 9
     params:
       conf/config.yaml:
@@ -278,11 +307,11 @@ stages:
       size: 94
     - path: Models/dvc_train/config_snapshot.yaml
       hash: md5
-      md5: 1bfb8acb70d942785b16a61badc72aad
-      size: 5464
+      md5: 80be029a976a73e2779560c766663c30
+      size: 5465
     - path: Models/dvc_train/final_model.pkl
       hash: md5
-      md5: 466d507d48306b2ec60b613f9f187242
+      md5: cd1e1401f816f3dcb2c824fc2f58eaef
       size: 1407128
     - path: Models/dvc_train/plots/confusion_matrix.png
       hash: md5
@@ -322,11 +351,11 @@ stages:
       size: 75
     - path: Models/dvc_train/training_preprocessor.pkl
       hash: md5
-      md5: c361d7fe9c5fa26b85f4abcd7db9ee83
+      md5: 3f2fcc04b302ffb968b31857db022124
       size: 854370
     - path: Models/dvc_train/training_run_metadata.yaml
       hash: md5
-      md5: f8fbbe4c134007dbf727e471638ce41c
+      md5: 0df3b6e6a6a76b235733fab4fae19461
       size: 1055
   download:
     cmd: uv run python main.py run.step=download
