@@ -53,6 +53,8 @@ previous_application.csv
 POS_CASH_balance.csv
 installments_payments.csv
 credit_card_balance.csv
+sample_submission.csv
+HomeCredit_columns_description.csv
 ```
 
 `Data/` is git-ignored.
@@ -70,7 +72,9 @@ The reproducible process/train pipeline is defined in `dvc.yaml`:
 uv run dvc repro
 ```
 
-The DVC order is `download -> process -> train`.
+The DVC order is `download -> process -> train`. DVC training disables MLflow
+remote logging by default so `dvc repro` stays a local reproducibility command;
+use `uv run python main.py run.step=train` when you want MLflow/DagsHub tracking.
 
 Data validation runs during `process` and writes
 `Data/final/validation_report.yaml`.

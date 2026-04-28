@@ -14,7 +14,14 @@ stages:
   process:
     cmd: uv run python main.py run.step=process
     deps:
-      - Data/Raw
+      - Data/Raw/application_train.csv
+      - Data/Raw/application_test.csv
+      - Data/Raw/bureau.csv
+      - Data/Raw/bureau_balance.csv
+      - Data/Raw/previous_application.csv
+      - Data/Raw/POS_CASH_balance.csv
+      - Data/Raw/installments_payments.csv
+      - Data/Raw/credit_card_balance.csv
       - main.py
       - src/common
       - src/data_processing
@@ -25,6 +32,8 @@ stages:
           - data.raw
           - data.final
           - pipeline
+          - training.target_col
+          - training.id_col
     outs:
       - Data/final
 
@@ -33,6 +42,7 @@ stages:
       uv run python main.py run.step=train
       training.experiment.name=dvc_train
       training.experiment.overwrite_existing=true
+      tracking.mlflow.enabled=false
     deps:
       - Data/final
       - main.py
@@ -73,4 +83,4 @@ stages:
           cache: true
     metrics:
       - Models/dvc_train/reports/metrics.yaml:
-          cache: true
+          cache: false

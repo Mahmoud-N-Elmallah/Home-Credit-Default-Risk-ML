@@ -4,6 +4,11 @@ __pycache__/
 *$py.class
 # my ignores 
 Models/*
+!Models/dvc_train/
+Models/dvc_train/*
+!Models/dvc_train/reports/
+Models/dvc_train/reports/*
+!Models/dvc_train/reports/metrics.yaml
 !Models/20260420_174015_balanced_catboost/
 Models/20260420_174015_balanced_catboost/*
 !Models/20260420_174015_balanced_catboost/plots/

@@ -95,5 +95,7 @@ def latest_submission_path(config):
         return None
 
     experiment_dir = Path(latest_path.read_text(encoding="utf-8").strip())
+    if not experiment_dir.is_absolute():
+        experiment_dir = models_dir / experiment_dir
     submission_path = training_artifact_relative_path("submission")
     return submission_path if submission_path.is_absolute() else experiment_dir / submission_path

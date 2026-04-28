@@ -60,7 +60,11 @@ def write_latest_experiment_pointer(models_root, config, experiment_dir):
     if not latest_path.is_absolute():
         latest_path = models_root / latest_path
     latest_path.parent.mkdir(parents=True, exist_ok=True)
-    latest_path.write_text(str(experiment_dir.resolve()), encoding="utf-8")
+    try:
+        experiment_pointer = experiment_dir.relative_to(models_root)
+    except ValueError:
+        experiment_pointer = experiment_dir
+    latest_path.write_text(str(experiment_pointer).replace("\\", "/"), encoding="utf-8")
 
 
 def save_config_snapshot(experiment_dir, config):
