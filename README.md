@@ -115,6 +115,8 @@ uv run python main.py run.step=train
 
 # run download, process, and train
 uv run python main.py run.step=all
+#or
+uv run dvc repro
 ```
 
 Hydra overrides are supported:
@@ -178,6 +180,9 @@ Run with Docker after filling `.env`:
 ```powershell
 docker build -t home-credit-api .
 docker run --env-file .env -p 8000:8000 home-credit-api
+#or u can pull from docker hub
+docker pull jaxxy99/home-credit-default-api:latest
+docker run --env-file .env -p 8000:8000 jaxxy99/home-credit-default-api:latest
 ```
 
 For Docker, `.env` must include `MLFLOW_TRACKING_USERNAME` and
@@ -196,6 +201,7 @@ GET  /ready
 GET  /metadata
 POST /predict
 ```
+<img width="926" height="418" alt="image" src="https://github.com/user-attachments/assets/4f9286e6-7d16-4304-b382-d75179da8eff" />
 
 `POST /predict` accepts one processed feature row or a list of processed
 feature rows. Raw application rows are not accepted because the model needs
