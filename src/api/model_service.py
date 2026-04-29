@@ -29,6 +29,22 @@ class ModelNotLoadedError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class InputDiagnostics:
+    recognized_columns: list[str]
+    ignored_columns: list[str]
+    filled_missing_count: int
+    filled_missing_preview: list[str]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "recognized_columns": self.recognized_columns,
+            "ignored_columns": self.ignored_columns,
+            "filled_missing_count": self.filled_missing_count,
+            "filled_missing_preview": self.filled_missing_preview,
+        }
+
+
 def api_model_config(config: dict[str, Any]) -> ApiModelConfig:
     api_config = config["api"]
     inference_config = config["inference"]
@@ -89,7 +105,15 @@ class PredictionService:
             logger.exception("Failed to load API model.")
         return self
 
+    def predict_with_diagnostics(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        predictions, diagnostics = self._predict(rows)
+        return {"predictions": predictions, "input_diagnostics": diagnostics.as_dict()}
+
     def predict(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        predictions, _ = self._predict(rows)
+        return predictions
+
+    def _predict(self, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], InputDiagnostics]:
         if self.model is None:
             raise ModelNotLoadedError("Model is not loaded.")
         if not rows:
@@ -99,8 +123,11 @@ class PredictionService:
 
         frame = pd.DataFrame(rows)
         ids = frame[self.config.id_col].tolist() if self.config.id_col in frame.columns else list(range(len(frame)))
-        frame = align_to_model_signature(self.model, frame)
-        predictions = self.model.predict(frame)
+        frame, diagnostics = align_to_model_signature(self.model, frame, self.config.id_col)
+        try:
+            predictions = self.model.predict(frame)
+        except Exception as exc:
+            raise ValueError(f"Model prediction failed: {exc}") from exc
         probabilities = prediction_probabilities(predictions, self.config.probability_col)
 
         output = []
@@ -114,29 +141,68 @@ class PredictionService:
             if self.config.include_binary_label:
                 item[self.config.label_col] = int(float(probability) >= self.config.classification_threshold)
             output.append(item)
-        return output
+        return output, diagnostics
 
 
-def align_to_model_signature(model, frame: pd.DataFrame) -> pd.DataFrame:
-    expected_columns = model_signature_columns(model)
-    if not expected_columns:
-        return frame
-    return frame.reindex(columns=expected_columns, fill_value=0)
+def align_to_model_signature(model, frame: pd.DataFrame, id_col: str) -> tuple[pd.DataFrame, InputDiagnostics]:
+    expected_schema = model_signature_schema(model)
+    if not expected_schema:
+        return frame, InputDiagnostics(list(frame.columns), [], 0, [])
+
+    expected_columns = list(expected_schema.keys())
+    provided_columns = list(frame.columns)
+    expected_set = set(expected_columns)
+    recognized_columns = [column for column in provided_columns if column in expected_set]
+    ignored_columns = [column for column in provided_columns if column not in expected_set]
+    recognized_features = [column for column in recognized_columns if column != id_col]
+    if not recognized_features:
+        raise ValueError(
+            "No recognized model feature columns were provided. Send processed feature columns from /metadata, "
+            "for example EXT_SOURCE_2, EXT_SOURCE_3, EXT_SOURCES_MEAN, or CREDIT_TERM."
+        )
+
+    missing_columns = [column for column in expected_columns if column not in frame.columns]
+    aligned = frame.reindex(columns=expected_columns, fill_value=0)
+    for column, type_name in expected_schema.items():
+        aligned[column] = coerce_column_to_schema_type(aligned[column], type_name, column)
+
+    diagnostics = InputDiagnostics(
+        recognized_columns=recognized_columns,
+        ignored_columns=ignored_columns,
+        filled_missing_count=len(missing_columns),
+        filled_missing_preview=missing_columns[:10],
+    )
+    return aligned, diagnostics
 
 
 def model_signature_columns(model) -> list[str]:
+    return list(model_signature_schema(model).keys())
+
+
+def model_signature_schema(model) -> dict[str, str]:
     metadata = getattr(model, "metadata", None)
     if metadata is None or not hasattr(metadata, "get_input_schema"):
-        return []
+        return {}
     schema = metadata.get_input_schema()
     if schema is None:
-        return []
-    columns = []
+        return {}
+    columns = {}
     for input_spec in getattr(schema, "inputs", []):
         name = getattr(input_spec, "name", None)
         if name:
-            columns.append(name)
+            columns[name] = str(getattr(input_spec, "type", "")).lower()
     return columns
+
+
+def coerce_column_to_schema_type(series: pd.Series, type_name: str, column: str) -> pd.Series:
+    try:
+        if "double" in type_name or "float" in type_name:
+            return pd.to_numeric(series, errors="raise").astype("float64")
+        if "long" in type_name or "integer" in type_name:
+            return pd.to_numeric(series, errors="raise").astype("int64")
+    except Exception as exc:
+        raise ValueError(f"Column {column} cannot be converted to MLflow schema type {type_name}.") from exc
+    return series
 
 
 def prediction_probabilities(predictions, probability_col: str) -> list[float]:

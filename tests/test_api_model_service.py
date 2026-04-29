@@ -27,7 +27,10 @@ class FakeModel:
         self.calls = 0
         self.last_frame = None
         if signature_columns is not None:
-            inputs = [SimpleNamespace(name=name) for name in signature_columns]
+            if isinstance(signature_columns, dict):
+                inputs = [SimpleNamespace(name=name, type=type_name) for name, type_name in signature_columns.items()]
+            else:
+                inputs = [SimpleNamespace(name=name) for name in signature_columns]
             self.metadata = SimpleNamespace(get_input_schema=lambda: SimpleNamespace(inputs=inputs))
 
     def predict(self, frame):
@@ -75,6 +78,29 @@ class ApiModelServiceTest(unittest.TestCase):
 
         self.assertEqual(model.last_frame.columns.tolist(), ["SK_ID_CURR", "FEATURE_A", "FEATURE_B"])
         self.assertEqual(model.last_frame["FEATURE_B"].tolist(), [0])
+
+    def test_predict_rejects_payload_with_no_recognized_features(self):
+        model = FakeModel([0.4], signature_columns=["SK_ID_CURR", "FEATURE_A"])
+        service = PredictionService(model_config(), model=model)
+
+        with self.assertRaisesRegex(ValueError, "No recognized model feature"):
+            service.predict([{"SK_ID_CURR": 10, "UNKNOWN_RAW_FIELD": 1.5}])
+
+    def test_predict_casts_integer_values_to_float_schema_columns(self):
+        model = FakeModel(
+            [0.4],
+            signature_columns={
+                "SK_ID_CURR": "long",
+                "AMT_INCOME_TOTAL": "double",
+                "EXT_SOURCE_2": "double",
+            },
+        )
+        service = PredictionService(model_config(), model=model)
+
+        service.predict([{"SK_ID_CURR": 10, "AMT_INCOME_TOTAL": 10000, "EXT_SOURCE_2": 1}])
+
+        self.assertEqual(str(model.last_frame["AMT_INCOME_TOTAL"].dtype), "float64")
+        self.assertEqual(str(model.last_frame["EXT_SOURCE_2"].dtype), "float64")
 
     def test_predict_rejects_oversized_batch(self):
         service = PredictionService(model_config(max_batch_size=1), model=FakeModel([0.1, 0.2]))

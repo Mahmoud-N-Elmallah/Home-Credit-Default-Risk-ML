@@ -34,3 +34,4 @@ class PredictionResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     predictions: list[dict[str, Any]]
+    input_diagnostics: dict[str, Any] | None = None

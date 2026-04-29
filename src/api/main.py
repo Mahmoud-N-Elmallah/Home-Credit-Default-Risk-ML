@@ -69,7 +69,7 @@ def create_app(config: dict[str, Any] | None = None, service: PredictionService 
         rows = normalize_payload(payload)
         active_service = request.app.state.prediction_service
         try:
-            return {"predictions": active_service.predict(rows)}
+            return active_service.predict_with_diagnostics(rows)
         except ModelNotLoadedError as error:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
         except ValueError as error:
