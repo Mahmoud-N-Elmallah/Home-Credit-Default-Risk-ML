@@ -42,7 +42,7 @@ stages:
       uv run python main.py run.step=train
       training.experiment.name=dvc_train
       training.experiment.overwrite_existing=true
-      tracking.mlflow.enabled=false
+      tracking.mlflow.enabled=true
     deps:
       - Data/final
       - main.py

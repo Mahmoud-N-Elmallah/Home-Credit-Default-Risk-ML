@@ -94,7 +94,7 @@ api:
   model_source: ${oc.env:API_MODEL_SOURCE,mlflow}
   model_name: ${oc.env:API_MODEL_NAME,home-credit-default-risk}
   model_alias: ${oc.env:API_MODEL_ALIAS,champion}
-  max_batch_size: 100
+  max_batch_size: 128
   include_binary_label: true
   classification_threshold: ${inference.default_threshold}
 
@@ -114,9 +114,9 @@ inference:
 training:
   target_col: "TARGET"
   id_col: "SK_ID_CURR"
-  cv_splits: 3
+  cv_splits: 5
   optuna_n_trials: 5
-  optuna_subsample_rate: 0.20
+  optuna_subsample_rate: 0.15
   run_full_oof_validation: true
   accelerator: "gpu"
   phases:
