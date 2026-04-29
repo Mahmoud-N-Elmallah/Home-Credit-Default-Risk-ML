@@ -115,6 +115,8 @@ uv run python main.py run.step=train
 
 # run download, process, and train
 uv run python main.py run.step=all
+#or
+uv run dvc repro
 ```
 
 Hydra overrides are supported:
@@ -178,6 +180,9 @@ Run with Docker after filling `.env`:
 ```powershell
 docker build -t home-credit-api .
 docker run --env-file .env -p 8000:8000 home-credit-api
+#or u can pull from docker hub
+docker pull jaxxy99/home-credit-default-api:latest
+docker run --env-file .env -p 8000:8000 jaxxy99/home-credit-default-api:latest
 ```
 
 The API loads the MLflow Registry model alias configured by
