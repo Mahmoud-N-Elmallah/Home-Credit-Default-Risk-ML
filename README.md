@@ -197,6 +197,7 @@ GET  /ready
 GET  /metadata
 POST /predict
 ```
+<img width="926" height="418" alt="image" src="https://github.com/user-attachments/assets/4f9286e6-7d16-4304-b382-d75179da8eff" />
 
 `POST /predict` accepts one processed feature row or a list of processed
 feature rows. Raw application rows are not accepted because the model needs
