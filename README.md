@@ -180,6 +180,10 @@ docker build -t home-credit-api .
 docker run --env-file .env -p 8000:8000 home-credit-api
 ```
 
+For Docker, `.env` must include `MLFLOW_TRACKING_USERNAME` and
+`MLFLOW_TRACKING_PASSWORD`. When both are present, the API uses MLflow basic
+auth and does not start DagsHub browser/OAuth login inside the container.
+
 The API loads the MLflow Registry model alias configured by
 `API_MODEL_NAME` and `API_MODEL_ALIAS`. By default this is
 `models:/home-credit-default-risk@champion`.

@@ -13,6 +13,7 @@ from src.model_training.tracking import (
     dagshub_repo_from_uri,
     dvc_remote_url,
     end_mlflow_run,
+    mlflow_basic_auth_configured,
     numeric_items,
     tracking_run,
 )
@@ -157,6 +158,36 @@ class TrackingTest(unittest.TestCase):
             patch("src.model_training.tracking.load_project_dotenv"),
         ):
             self.assertEqual(dvc_remote_url(), "https://example.test/project.dvc")
+
+    def test_mlflow_basic_auth_requires_username_and_password(self):
+        with patch.dict("os.environ", {"MLFLOW_TRACKING_USERNAME": "user"}, clear=True):
+            self.assertFalse(mlflow_basic_auth_configured())
+
+        with patch.dict(
+            "os.environ",
+            {"MLFLOW_TRACKING_USERNAME": "user", "MLFLOW_TRACKING_PASSWORD": "token"},
+            clear=True,
+        ):
+            self.assertTrue(mlflow_basic_auth_configured())
+
+    def test_dagshub_tracking_backend_skips_oauth_when_basic_auth_is_configured(self):
+        uri = "https://dagshub.com/owner/repo.mlflow"
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "MLFLOW_TRACKING_USERNAME": "user",
+                    "MLFLOW_TRACKING_PASSWORD": "token",
+                },
+                clear=True,
+            ),
+            patch("src.model_training.tracking.load_project_dotenv"),
+            patch("mlflow.set_tracking_uri") as set_tracking_uri,
+            patch.dict("sys.modules", {"dagshub": None}),
+        ):
+            configure_tracking_backend({"tracking_uri": uri})
+
+        set_tracking_uri.assert_called_once_with(uri)
 
     def test_registry_wrapper_is_mlflow_python_model(self):
         self.assertTrue(issubclass(CreditRiskPyFuncModel, mlflow.pyfunc.PythonModel))

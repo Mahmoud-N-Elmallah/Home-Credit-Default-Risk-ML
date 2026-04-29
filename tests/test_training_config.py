@@ -8,9 +8,9 @@ class TrainingConfigTest(unittest.TestCase):
         config = load_hydra_config()
         training = config["training"]
 
-        self.assertEqual(training["cv_splits"], 3)
+        self.assertEqual(training["cv_splits"], 5)
         self.assertEqual(training["optuna_n_trials"], 5)
-        self.assertEqual(training["optuna_subsample_rate"], 0.20)
+        self.assertEqual(training["optuna_subsample_rate"], 0.15)
         self.assertTrue(training["run_full_oof_validation"])
         self.assertFalse(training["preprocessing"]["feature_selection"]["enabled_during_search"])
 

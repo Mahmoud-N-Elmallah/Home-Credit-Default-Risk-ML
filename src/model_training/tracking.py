@@ -101,17 +101,22 @@ def dagshub_repo_from_uri(tracking_uri):
     return parts[0], parts[1].removesuffix(".mlflow")
 
 
+def mlflow_basic_auth_configured():
+    return bool(os.getenv("MLFLOW_TRACKING_USERNAME") and os.getenv("MLFLOW_TRACKING_PASSWORD"))
+
+
 def configure_tracking_backend(config_section):
     load_project_dotenv()
     tracking_uri = os.getenv("MLFLOW_TRACKING_URI") or config_section["tracking_uri"]
     repo = dagshub_repo_from_uri(tracking_uri)
-    if repo:
+
+    import mlflow
+
+    if repo and not mlflow_basic_auth_configured():
         import dagshub
 
         dagshub.init(repo_owner=repo[0], repo_name=repo[1], mlflow=True)
         return
-
-    import mlflow
 
     mlflow.set_tracking_uri(tracking_uri)
 
