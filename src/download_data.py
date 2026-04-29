@@ -3,6 +3,8 @@ import shutil
 from pathlib import Path
 from zipfile import ZipFile
 
+from src.common.env import load_project_dotenv
+
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ def extract_expected_files(archive_path, raw_dir):
 
 
 def authenticate_kaggle(api_factory=None):
+    load_project_dotenv()
     if api_factory is None:
         try:
             from kaggle.api.kaggle_api_extended import KaggleApi

@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from zipfile import ZipFile
 
 from main import validate_step
@@ -8,6 +9,7 @@ from src.download_data import (
     COMPETITION_SLUG,
     EXPECTED_RAW_FILENAMES,
     RawDataDownloadError,
+    authenticate_kaggle,
     download_raw_data,
     extract_expected_files,
     missing_raw_files,
@@ -101,6 +103,13 @@ class DownloadDataTest(unittest.TestCase):
 
             with self.assertRaisesRegex(RawDataDownloadError, "Kaggle download failed"):
                 download_raw_data(raw_config(raw_dir), api_factory=lambda: FakeKaggleApi(fail_download=True))
+
+    def test_kaggle_authentication_loads_project_dotenv(self):
+        with patch("src.download_data.load_project_dotenv") as load_env:
+            api = authenticate_kaggle(api_factory=FakeKaggleApi)
+
+        load_env.assert_called_once()
+        self.assertTrue(api.authenticated)
 
     def test_main_step_validation_accepts_download_and_reports_expected_values(self):
         self.assertEqual(validate_step("download"), "download")

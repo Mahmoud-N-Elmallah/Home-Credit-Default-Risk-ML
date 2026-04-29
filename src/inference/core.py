@@ -6,7 +6,7 @@ import joblib
 import pandas as pd
 
 from src.common.artifacts import model_artifact_path, training_artifact_relative_path
-from src.common.config_io import resolve_project_path
+from src.common.config_io import load_yaml, resolve_project_path
 from src.common.logging import configure_logging
 from src.common.schema import clean_column_names, expected_preprocessor_input_columns
 

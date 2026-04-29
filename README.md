@@ -29,6 +29,28 @@ uv run python main.py --help
 
 Dependencies are declared in `pyproject.toml` and locked in `uv.lock`.
 
+## Environment Variables
+
+Local secrets can live in `.env`. Start from `.env.example`, replace placeholder
+values, and keep `.env` out of Git. The project loads `.env` automatically for
+CLI, Kaggle download, inference, and MLflow/DagsHub tracking. Existing shell
+environment variables still take precedence over `.env` values.
+
+For DagsHub MLflow, set `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, and
+`MLFLOW_TRACKING_PASSWORD`. The MLflow config reads `MLFLOW_TRACKING_URI` from
+the environment when present.
+
+DVC commands are external CLI commands, so Python `load_dotenv()` cannot make
+`dvc pull` or `dvc push` read `.env` directly. After filling `DVC_REMOTE_URL`,
+`DVC_REMOTE_USER`, and `DVC_REMOTE_PASSWORD`, write DVC's ignored local
+credential file:
+
+```powershell
+uv run python -m src.common.configure_dvc_remote
+```
+
+This writes `.dvc/config.local`, which is ignored by Git.
+
 ## Data
 
 Raw data comes from the Kaggle
@@ -143,6 +165,57 @@ uv run python src\inference.py --input Data\final\final_test.csv
 The input must match the processed feature schema. Raw application rows alone
 are not enough because the model uses engineered aggregate features.
 
+## API Serving
+
+Run the FastAPI service locally:
+
+```powershell
+uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+```
+
+Run with Docker after filling `.env`:
+
+```powershell
+docker build -t home-credit-api .
+docker run --env-file .env -p 8000:8000 home-credit-api
+```
+
+The API loads the MLflow Registry model alias configured by
+`API_MODEL_NAME` and `API_MODEL_ALIAS`. By default this is
+`models:/home-credit-default-risk@champion`.
+
+Endpoints:
+
+```text
+GET  /health
+GET  /ready
+GET  /metadata
+POST /predict
+```
+
+`POST /predict` accepts one processed feature row or a list of processed
+feature rows. Raw application rows are not accepted because the model needs
+engineered aggregate features from `Data/final/`.
+
+Single-row smoke request:
+
+```powershell
+curl -X POST http://localhost:8000/predict `
+  -H "Content-Type: application/json" `
+  -d "{\"SK_ID_CURR\": 100001, \"EXT_SOURCE_2\": 0.5, \"EXT_SOURCE_3\": 0.4}"
+```
+
+Batch smoke request:
+
+```powershell
+curl -X POST http://localhost:8000/predict `
+  -H "Content-Type: application/json" `
+  -d "[{\"SK_ID_CURR\": 100001, \"EXT_SOURCE_2\": 0.5, \"EXT_SOURCE_3\": 0.4}, {\"SK_ID_CURR\": 100002, \"EXT_SOURCE_2\": 0.2, \"EXT_SOURCE_3\": 0.8}]"
+```
+
+These examples prove API shape only. Real requests should use processed rows
+matching the feature schema produced by the pipeline.
+
 ## Outputs
 
 Processing writes:
@@ -174,8 +247,9 @@ tracking, or disable tracking for local-only runs with
 `tracking.mlflow.enabled=false`.
 
 Training logs params, metrics, curated artifacts, and a PyFunc model wrapper to
-MLflow. Accepted runs are registered as `home-credit-default-risk` and assigned
-the `champion` alias when the configured metric gate passes.
+MLflow. Runs are registered as `home-credit-default-risk` and assigned the
+`champion` alias only when out-of-fold ROC AUC is at least the configured
+registry gate, currently `tracking.mlflow.registry.min_roc_auc=0.785`.
 
 ## Config
 

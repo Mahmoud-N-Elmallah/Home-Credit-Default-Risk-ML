@@ -4,6 +4,8 @@ from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
 import yaml
 
+from src.common.env import load_project_dotenv
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,6 +21,7 @@ def load_yaml(path):
 
 
 def load_hydra_config(overrides=None):
+    load_project_dotenv()
     config_dir = PROJECT_ROOT / "conf"
     with initialize_config_dir(version_base=None, config_dir=str(config_dir)):
         cfg = compose(config_name="config", overrides=overrides or [])

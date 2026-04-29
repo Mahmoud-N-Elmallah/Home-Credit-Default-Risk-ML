@@ -2,11 +2,20 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import mlflow.pyfunc
 
 from src.model_training.tracking import CreditRiskPyFuncModel
-from src.model_training.tracking import MlflowTracker, dagshub_repo_from_uri, end_mlflow_run, numeric_items, tracking_run
+from src.model_training.tracking import (
+    MlflowTracker,
+    configure_tracking_backend,
+    dagshub_repo_from_uri,
+    dvc_remote_url,
+    end_mlflow_run,
+    numeric_items,
+    tracking_run,
+)
 
 
 def tracking_config(enabled=False):
@@ -116,6 +125,38 @@ class TrackingTest(unittest.TestCase):
             dagshub_repo_from_uri(uri),
             ("mahmoudelmalah85", "Home-Credit-Default-Risk-ML"),
         )
+
+    def test_tracking_backend_loads_project_dotenv(self):
+        config = {"tracking_uri": "file:///tmp/mlruns"}
+
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch("src.model_training.tracking.load_project_dotenv") as load_env,
+            patch("mlflow.set_tracking_uri") as set_tracking_uri,
+        ):
+            configure_tracking_backend(config)
+
+        load_env.assert_called_once()
+        set_tracking_uri.assert_called_once_with("file:///tmp/mlruns")
+
+    def test_tracking_backend_prefers_env_tracking_uri(self):
+        config = {"tracking_uri": "file:///tmp/config-mlruns"}
+
+        with (
+            patch.dict("os.environ", {"MLFLOW_TRACKING_URI": "file:///tmp/env-mlruns"}, clear=True),
+            patch("src.model_training.tracking.load_project_dotenv"),
+            patch("mlflow.set_tracking_uri") as set_tracking_uri,
+        ):
+            configure_tracking_backend(config)
+
+        set_tracking_uri.assert_called_once_with("file:///tmp/env-mlruns")
+
+    def test_dvc_remote_url_prefers_env_url(self):
+        with (
+            patch.dict("os.environ", {"DVC_REMOTE_URL": "https://example.test/project.dvc"}, clear=True),
+            patch("src.model_training.tracking.load_project_dotenv"),
+        ):
+            self.assertEqual(dvc_remote_url(), "https://example.test/project.dvc")
 
     def test_registry_wrapper_is_mlflow_python_model(self):
         self.assertTrue(issubclass(CreditRiskPyFuncModel, mlflow.pyfunc.PythonModel))

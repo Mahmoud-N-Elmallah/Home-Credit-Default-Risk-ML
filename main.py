@@ -8,6 +8,7 @@ from omegaconf import DictConfig, OmegaConf
 
 # Ensure src module can be found
 sys.path.append(str(Path(__file__).parent))
+from src.common.env import load_project_dotenv
 from src.common.logging import configure_logging
 from src.data_processing.run_pipeline import run_pipeline
 from src.download_data import download_raw_data
@@ -32,6 +33,7 @@ def validate_step(step):
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig):
+    load_project_dotenv()
     log_path = configure_hydra_run_logging()
     config = OmegaConf.to_container(cfg, resolve=True)
     step = validate_step(config.get("run", {}).get("step", "all"))

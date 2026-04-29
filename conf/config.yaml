@@ -74,7 +74,7 @@ artifacts:
 tracking:
   mlflow:
     enabled: true
-    tracking_uri: "https://dagshub.com/mahmoudelmalah85/Home-Credit-Default-Risk-ML.mlflow"
+    tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,https://dagshub.com/mahmoudelmalah85/Home-Credit-Default-Risk-ML.mlflow}
     experiment_name: "home-credit-default-risk-ml"
     log_artifacts: true
     log_model_artifacts: true
@@ -82,13 +82,21 @@ tracking:
       enabled: true
       registered_model_name: "home-credit-default-risk"
       alias: "champion"
-      min_roc_auc: 0.0
+      min_roc_auc: 0.785
       required: false
 
 analysis:
   shap:
     sample_size: 5000
     top_n: 30
+
+api:
+  model_source: ${oc.env:API_MODEL_SOURCE,mlflow}
+  model_name: ${oc.env:API_MODEL_NAME,home-credit-default-risk}
+  model_alias: ${oc.env:API_MODEL_ALIAS,champion}
+  max_batch_size: 100
+  include_binary_label: true
+  classification_threshold: ${inference.default_threshold}
 
 inference:
   input_path:

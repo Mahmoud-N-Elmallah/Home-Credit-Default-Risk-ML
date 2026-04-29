@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from src.common.config_io import load_hydra_config
 
@@ -32,6 +33,17 @@ class HydraConfigTest(unittest.TestCase):
         self.assertNotIn("verbosity", training)
         self.assertEqual(list(training["artifact_paths"].keys()), ["models_dir"])
         self.assertEqual(set(shap_config.keys()), {"sample_size", "top_n"})
+
+    def test_mlflow_tracking_uri_can_come_from_environment(self):
+        with patch.dict("os.environ", {"MLFLOW_TRACKING_URI": "file:///tmp/test-mlruns"}):
+            config = load_hydra_config()
+
+        self.assertEqual(config["tracking"]["mlflow"]["tracking_uri"], "file:///tmp/test-mlruns")
+
+    def test_registry_only_accepts_models_above_roc_auc_gate(self):
+        config = load_hydra_config()
+
+        self.assertEqual(config["tracking"]["mlflow"]["registry"]["min_roc_auc"], 0.785)
 
 
 if __name__ == "__main__":

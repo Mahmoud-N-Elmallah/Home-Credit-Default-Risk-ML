@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,6 +11,7 @@ import pandas as pd
 import yaml
 
 from src.common.artifacts import model_artifact_path, training_artifact_relative_path
+from src.common.env import load_project_dotenv
 from src.common.schema import clean_column_names, expected_preprocessor_input_columns
 from src.model_training.config import get_primary_estimator_config, primary_model_name
 
@@ -77,6 +79,11 @@ def safe_param(value):
 
 
 def dvc_remote_url():
+    load_project_dotenv()
+    env_url = os.getenv("DVC_REMOTE_URL")
+    if env_url:
+        return env_url
+
     config_path = Path(".dvc") / "config"
     if not config_path.exists():
         return None
@@ -95,7 +102,8 @@ def dagshub_repo_from_uri(tracking_uri):
 
 
 def configure_tracking_backend(config_section):
-    tracking_uri = config_section["tracking_uri"]
+    load_project_dotenv()
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI") or config_section["tracking_uri"]
     repo = dagshub_repo_from_uri(tracking_uri)
     if repo:
         import dagshub
