@@ -128,6 +128,7 @@ stages:
       hash: md5
       md5: b90840494f9673b9b8bc17e9029e0b39
       size: 1734
+      isexec: true
     - path: src/common
       hash: md5
       md5: b5d68cfda09949c8d5da752488397987.dir
@@ -135,8 +136,8 @@ stages:
       nfiles: 7
     - path: src/model_training
       hash: md5
-      md5: e5d60fdf6baf690610ada720117702a4.dir
-      size: 52622
+      md5: ea47bd43ef7d0479210ae2048f1ca366.dir
+      size: 52797
       nfiles: 9
     params:
       conf/config.yaml:
@@ -160,7 +161,7 @@ stages:
               enabled: true
               registered_model_name: home-credit-default-risk
               alias: champion
-              min_roc_auc: 0.785
+              min_roc_auc: 0.791
               required: false
         training:
           target_col: TARGET
@@ -307,11 +308,11 @@ stages:
       size: 93
     - path: Models/dvc_train/config_snapshot.yaml
       hash: md5
-      md5: c970a470e3d1543963db05d3569bab4a
+      md5: 76cb7f3e5c0229af43950cff15d4880e
       size: 5641
     - path: Models/dvc_train/final_model.pkl
       hash: md5
-      md5: bfd5b2b42875466bc9708b079a848f7c
+      md5: d8d03d470b87974c8c9223b696744646
       size: 698584
     - path: Models/dvc_train/plots/confusion_matrix.png
       hash: md5
@@ -351,11 +352,11 @@ stages:
       size: 76
     - path: Models/dvc_train/training_preprocessor.pkl
       hash: md5
-      md5: ced1dc477b32eb4a61b6b80ca6de22fb
+      md5: 7d0b5257009c6574ba76ad0627c2c0c7
       size: 854546
     - path: Models/dvc_train/training_run_metadata.yaml
       hash: md5
-      md5: 22d2fa99acc232308b706af3004f3965
+      md5: a15c2e7d95d5f908d3d191f4924c84d4
       size: 1057
   download:
     cmd: uv run python main.py run.step=download

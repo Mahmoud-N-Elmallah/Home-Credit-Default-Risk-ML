@@ -82,7 +82,7 @@ tracking:
       enabled: true
       registered_model_name: "home-credit-default-risk"
       alias: "champion"
-      min_roc_auc: 0.785
+      min_roc_auc: 0.791
       required: false
 
 analysis:
