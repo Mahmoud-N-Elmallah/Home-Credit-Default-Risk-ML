@@ -32,8 +32,6 @@ stages:
           - data.raw
           - data.final
           - pipeline
-          - training.target_col
-          - training.id_col
     outs:
       - Data/final
 
